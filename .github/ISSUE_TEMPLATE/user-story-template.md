@@ -1,7 +1,7 @@
 ---
 name: User story template
 about: Provides a template for user story reporting
-title: User Story
+title: User Story — 
 labels: Story
 
 ---
