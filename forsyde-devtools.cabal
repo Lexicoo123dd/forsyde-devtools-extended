@@ -117,6 +117,7 @@ test-suite forsyde-devtools-test
     ProceduralIRSpec
     ProceduralIRToCSpec
     SDFScheduleSpec
+    VisualiserKLighDSpec
 
   build-depends:
     forsyde-devtools,
