@@ -32,6 +32,7 @@ import qualified Language.LSP.Logging as LSP
 import qualified Language.LSP.Protocol.Message as LSP
 import qualified Language.LSP.Protocol.Types as LSP
 import qualified Language.LSP.Server as LSP
+import LSPUri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
@@ -175,7 +176,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
     edges = map createEdge signals
     graph =
       KGraph
-        { gid = T.pack ("file://" ++ filename),
+        { gid = filePathToUriText filename,
           child =
             KNode
               { gid = "$root",
@@ -215,7 +216,7 @@ updateOptions f _clientId =
             "valuedSynthesisOptions" .= (Seq.empty :: Seq.Seq A.Object),
             "layoutOptions" .= (Seq.empty :: Seq.Seq A.Object),
             "actions" .= (Seq.empty :: Seq.Seq A.Object),
-            "modelUri" .= T.pack ("file://" ++ f)
+            "modelUri" .= filePathToUriText f
           ]
     ]
 
@@ -237,7 +238,7 @@ diagramOpenInTextEditorMessage uri sline scol eline ecol =
   A.object
     [ "location"
         .= A.object
-          [ "uri" .= ("file://" <> uri),
+          [ "uri" .= filePathToUriText uri,
             "range"
               .= A.object
                 [ "start"
@@ -468,7 +469,7 @@ handlers =
         >>= getKey "options"
         >>= getKey "sourceUri"
         >>= \case
-          A.String _a -> Just $ T.unpack $ snd $ T.splitAt 7 _a
+          A.String uri -> uriTextToFilePath uri
           _ -> Nothing
     getClientId params =
       Just params
