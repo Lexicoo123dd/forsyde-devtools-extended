@@ -51,7 +51,9 @@ library
     ProceduralIR
     ProceduralIRToC
     SDFSchedule
+    SKGraphSchema
     Utilities
+    Visualiser.KLighD
 
 library examples
   import: common-options
@@ -98,6 +100,7 @@ executable forsyde-lsp-exe
     SDFSchedule
     SKGraphSchema
     Utilities
+    Visualiser.KLighD
 
 test-suite forsyde-devtools-test
   import: common-options

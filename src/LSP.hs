@@ -37,9 +37,9 @@ import Network.Socket
 import Options.Applicative
 import Prettyprinter
 import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
-import SKGraphSchema
 import System.IO
 import Utilities (compileToCoreWithForSyDePath)
+import Visualiser.KLighD (forSyDeIRToGraph)
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
@@ -49,143 +49,6 @@ diagramOpenInTextEditor = (LSP.SMethod_CustomMethod (Proxy @"diagram/openInTextE
 
 setPreferencesMethod :: LSP.SMethod (LSP.Method_CustomMethod "keith/preferences/setPreferences")
 setPreferencesMethod = (LSP.SMethod_CustomMethod (Proxy @"keith/preferences/setPreferences"))
-
--- | Convert ForSyDe IR into the graph representation understood by KLighD
-forSyDeIRToGraph :: FilePath -> IRSystem -> Maybe Schedule -> GraphElement
-forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = graph
-  where
-    -- \| Create a port with a label for signal rate
-    createPort parent rends props (n, _) =
-      KPort
-        { children = [],
-          renderings = rends,
-          properties = props,
-          gid = pid
-        }
-      where
-        pid = parent <> "$P$" <> T.show n
-    -- \| Create a node based on an IRActor
-    createNode = \case
-      (IRActor name _ _ _) ->
-        createNode'
-          name
-          (Just $ T.show name)
-          [KRoundedRectangle [KBackgroundColor 160 160 240] 4 4]
-          [ (NodeLabelsPlacement [1, 4, 6]),
-            (NodeSizeConstraints [0, 1, 2, 3]),
-            (NodeSizeMinimum [64, 64]),
-            (PortConstraints 2)
-          ]
-      (IRDelay name tokens _) ->
-        createNode'
-          name
-          (Just $ T.show $ length tokens)
-          [KEllipse [KBackgroundColor 0 0 0]]
-          [ (NodeLabelsPlacement [1, 3, 7]),
-            (NodeSizeConstraints [3]),
-            (NodeSizeMinimum [12, 12]),
-            (PortConstraints 2)
-          ]
-    -- \| Find all signals which the process is the source of
-    findOutputSignals sigs proc =
-      foldr f [] sigs
-      where
-        f s acc =
-          let IRSignal n (p, rate) _ = s
-           in if p == proc then (n, rate) : acc else acc
-    -- \| Find all signals which the process is the target of
-    findInputSignals sigs proc =
-      foldr f [] sigs
-      where
-        f s acc =
-          let IRSignal n _ (p, rate) = s
-           in if p == proc then (n, rate) : acc else acc
-    -- \| Helper to create signal label, including buffersize if schedule is known
-    signalLabel parent n = buflabel
-      where
-        sigid = parent <> "$L$" <> T.show n
-        siglabel = [KLabel {gid = sigid, label = T.show n, properties = [(NodeLabelsPlacement [1, 5, 7])]}]
-        buflabel = case sched of
-          Just (Schedule (_, buffers, _)) ->
-            case lookup n buffers of
-              Just size -> [KLabel {gid = sigid, label = "|" <> T.show n <> "| = " <> T.show size, properties = [(NodeLabelsPlacement [1, 5, 7])]}]
-              Nothing -> []
-          Nothing -> siglabel
-    -- \| Helper for createNode and global inputs / outputs
-    createNode' name l r p = node
-      where
-        nid = "$root$N$" <> T.show name
-        insignals = findInputSignals signals name
-        outsignals = findOutputSignals signals name
-        inportlabel = if delayId name actors then [] else [KText "▶" []]
-        inports = map (createPort nid inportlabel [PortSide 4]) insignals
-        outports = map (createPort nid [] [PortSide 2]) outsignals
-        siglabel =
-          if delayId name actors
-            then map (\(sigid, _) -> signalLabel nid sigid) insignals & mconcat
-            else []
-        nl = maybe [] (\lc -> [KLabel {gid = nid <> "$L$" <> T.show name, label = lc, properties = []}]) l
-        c = inports <> outports <> siglabel <> nl
-        node =
-          KNode
-            { gid = nid,
-              children = c,
-              renderings = r,
-              properties = p
-            }
-    -- \| Helper to check if an id belongs to a delay
-    delayId did =
-      any
-        ( \case
-            IRDelay aid _ _
-              | aid == did -> True
-              | otherwise -> False
-            _ -> False
-        )
-    -- \| Create an edge from an IRSignal, depends on port id
-    createEdge (IRSignal n (sname, srate) (tname, trate)) = edge
-      where
-        sn = "$root$N$" <> T.show sname <> "$P$" <> T.show n
-        tn = "$root$N$" <> T.show tname <> "$P$" <> T.show n
-        name = sn <> "$E$" <> T.show n
-        sigid = name <> "$L$" <> T.show n
-        tl = [KLabel {gid = sigid <> "$" <> T.show tname, label = T.show trate, properties = [EdgeLabelsPlacement 1]}]
-        sl = [KLabel {gid = sigid <> "$" <> T.show sname, label = T.show srate, properties = [EdgeLabelsPlacement 2]}]
-        (srclabel, tgtlabel, buflabel) = case (delayId sname actors, delayId tname actors) of
-          (True, True) -> ([], [], [])
-          (True, False) -> ([], tl, [])
-          (False, True) -> (sl, [], [])
-          (False, False) -> (sl, tl, signalLabel name n)
-        c = case n of
-          _ | n == sname -> tgtlabel
-          _ | n == tname -> srclabel
-          _ | otherwise -> buflabel <> srclabel <> tgtlabel
-        edge =
-          KEdge
-            { gid = name,
-              children = c,
-              renderings = [KRoundedBendsPolyline [] 4],
-              properties = [],
-              source = sn,
-              target = tn
-            }
-    nodes =
-      map createNode actors
-        <> map (\n -> createNode' n (Just $ T.show n) [] [LayerConstraint 2]) inputs
-        <> map (\n -> createNode' n (Just $ T.show n) [] [LayerConstraint 4]) outputs
-    edges = map createEdge signals
-    graph =
-      KGraph
-        { gid = filePathToUriText filename,
-          child =
-            KNode
-              { gid = "$root",
-                children = nodes ++ edges,
-                properties = [],
-                renderings = []
-              },
-          properties = []
-        }
 
 -- | Send our supported syntheses to the LSP client (KLighD-VSCode)
 setSynthesis :: T.Text -> A.Value
