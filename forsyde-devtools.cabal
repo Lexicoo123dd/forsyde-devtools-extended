@@ -47,6 +47,7 @@ library
     CoreIRToProceduralIR
     ForSyDeIR
     ForSyDeIRToProceduralIR
+    LSPUri
     ProceduralIR
     ProceduralIRToC
     SDFSchedule
@@ -92,6 +93,7 @@ executable forsyde-lsp-exe
     CoreIR
     CoreIRToForSyDeIR
     ForSyDeIR
+    LSPUri
     ProceduralIR
     SDFSchedule
     SKGraphSchema
@@ -108,6 +110,7 @@ test-suite forsyde-devtools-test
 
   other-modules:
     ForSyDeIRSpec
+    LSPUriSpec
     ProceduralIRSpec
     ProceduralIRToCSpec
     SDFScheduleSpec
