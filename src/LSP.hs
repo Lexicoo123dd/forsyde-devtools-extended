@@ -14,7 +14,6 @@ import Control.Concurrent (forkFinally)
 import qualified Control.Exception as E
 import Control.Monad (forever, void)
 import Control.Monad.IO.Class
-import CoreIRToForSyDeIR (translateCoreProgram)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Encode.Pretty as AP
@@ -36,10 +35,10 @@ import LSPUri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
+import SDFSchedule (Schedule (..))
 import System.IO
-import Utilities (compileToCoreWithForSyDePath)
 import Visualiser.KLighD (forSyDeIRToGraph)
+import API
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
@@ -370,15 +369,13 @@ run (Arguments comm (Host ip) (TCP p) i_f pkgPath) =
     (FromClient, CommStdio) ->
       void $ runServerC stdin stdout serverDef
     (InputFile f, _) -> do
-      (core, dflags) <- liftIO $ compileToCoreWithForSyDePath pkgPath f
-      let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
-            Left e -> error e
-            Right v -> v
-      let sched = case computeScheduleAndBuffers forsydeIR of
-            Left e -> error e
-            Right v -> v
-      let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
-      BSL8.putStrLn $ AP.encodePretty graphMessage
+      let options = API.CompileOptions { forSyDePath = pkgPath }
+      result <- liftIO $ API.compileFile options f
+      case result of
+        Left err -> error (show err)
+        Right CompileResult{resultIR = forsydeIR, resultSchedule = sched} -> do
+          let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
+          BSL8.putStrLn $ AP.encodePretty graphMessage
   where
     serverDef =
       LSP.ServerDefinition
