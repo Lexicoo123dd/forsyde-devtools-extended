@@ -91,6 +91,7 @@ executable forsyde-lsp-exe
 
   build-depends: forsyde-devtools
   other-modules:
+    API
     ArgumentsLSP
     CoreIR
     CoreIRToForSyDeIR
