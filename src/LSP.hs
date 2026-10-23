@@ -14,7 +14,6 @@ import Control.Concurrent (forkFinally)
 import qualified Control.Exception as E
 import Control.Monad (forever, void)
 import Control.Monad.IO.Class
-import CoreIRToForSyDeIR (translateCoreProgram)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Encode.Pretty as AP
@@ -36,10 +35,10 @@ import LSPUri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
+import SDFSchedule (Schedule (..))
 import System.IO
-import Utilities (compileToCoreWithForSyDePath)
 import Visualiser.KLighD (forSyDeIRToGraph)
+import API
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
@@ -137,6 +136,23 @@ defaultConfig =
       schedule = Nothing,
       forSyDePkg = Nothing
     }
+
+recomputeModel :: LSP.LspT Config IO ()
+recomputeModel = do
+  config <- LSP.getConfig
+  case file config of
+    Nothing -> pure ()
+    Just sourceFile -> do
+      let options = API.CompileOptions { forSyDePath = forSyDePkg config }
+      result <- liftIO $ API.compileFile options sourceFile
+      case result of
+        Left err -> do
+          dualLogger <& ("Compilation failed: " <> T.show err) `L.WithSeverity` L.Error
+        Right compiled -> do
+          LSP.setConfig config
+            { system = Just (resultIR compiled),
+              schedule = Just (resultSchedule compiled) }
+
 
 -- | The static notification and request handlers we support
 handlers :: LSP.Handlers (LSP.LspM Config)
@@ -250,41 +266,6 @@ handlers =
             >> LSP.sendNotification diagramAcceptMethod (updateOptions curFile curId)
             >> LSP.sendNotification diagramAcceptMethod (requestBounds curFile curId curSystem curSched)
         _ -> dualLogger <& ("does not have enough information to send diagram: " <> T.show config) `L.WithSeverity` L.Error
-    recomputeModel :: LSP.LspT Config IO ()
-    recomputeModel = do
-      config <- LSP.getConfig
-      out <- case config of
-        Config {file = Just newfile} ->
-          compileToModelMaybe newfile
-        _ -> pure Nothing
-      case out of
-        Nothing -> pure ()
-        Just ir -> do
-          LSP.setConfig config {system = out}
-          sched <- computeScheduleMaybe ir
-          LSP.setConfig config {system = out, schedule = sched}
-          pure ()
-    compileToModelMaybe f = do
-      config <- LSP.getConfig
-      dualLogger <& ("Compiling: " <> T.show f) `L.WithSeverity` L.Debug
-      result <- liftIO $ E.try $ compileToCoreWithForSyDePath (forSyDePkg config) f
-      case result of
-        Left e -> do
-          dualLogger <& ("Failed to compile into core: " <> T.show (e :: E.SomeException)) `L.WithSeverity` L.Error
-          pure $ system config
-        Right (core, dflags) -> do
-          let s = translateCoreProgram dflags core
-          case s of
-            Left e -> do
-              dualLogger <& ("Failed to compile into ForSyDe IR: " <> T.pack e) `L.WithSeverity` L.Error
-              pure $ system config
-            Right (ir, _) -> pure $ Just ir
-    computeScheduleMaybe ir =
-      case computeScheduleAndBuffers ir of
-        Left e -> do
-          dualLogger <& ("Failed to compute schedule: " <> T.pack e) `L.WithSeverity` L.Error
-          pure Nothing
-        Right sched -> pure . Just $ sched
     findSignalSpan :: IRId -> [IRSignal] -> [IRSpan]
     findSignalSpan sig l = mapMaybe match l
       where
@@ -388,15 +369,13 @@ run (Arguments comm (Host ip) (TCP p) i_f pkgPath) =
     (FromClient, CommStdio) ->
       void $ runServerC stdin stdout serverDef
     (InputFile f, _) -> do
-      (core, dflags) <- liftIO $ compileToCoreWithForSyDePath pkgPath f
-      let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
-            Left e -> error e
-            Right v -> v
-      let sched = case computeScheduleAndBuffers forsydeIR of
-            Left e -> error e
-            Right v -> v
-      let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
-      BSL8.putStrLn $ AP.encodePretty graphMessage
+      let options = API.CompileOptions { forSyDePath = pkgPath }
+      result <- liftIO $ API.compileFile options f
+      case result of
+        Left err -> error (show err)
+        Right CompileResult{resultIR = forsydeIR, resultSchedule = sched} -> do
+          let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
+          BSL8.putStrLn $ AP.encodePretty graphMessage
   where
     serverDef =
       LSP.ServerDefinition
