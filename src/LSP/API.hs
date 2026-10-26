@@ -23,7 +23,7 @@ data Config = Config
   { file :: Maybe FilePath,
     clientId :: Maybe T.Text,
     system :: Maybe IRSystem,
-    schedule :: Maybe Schedule,
+    schedule :: Maybe (Either String Schedule),
     forSyDePkg :: Maybe FilePath
   }
   deriving (Show)
@@ -50,7 +50,7 @@ data CompileError
 
 data CompileResult = CompileResult
   { resultIR :: IRSystem,
-    resultSchedule:: Schedule
+    resultSchedule:: Either String Schedule
   }
 
 compileFile
@@ -67,13 +67,9 @@ compileFile options sourceFile = do
         Left e ->
           pure $ Left $ IRTranslationFailed e
         Right (ir, _) ->
-          case computeScheduleAndBuffers ir of
-            Left e ->
-              pure $ Left $ SchedulingFailed e
-            Right resSchedule ->
-              pure $ Right CompileResult
-                { resultIR = ir,
-                  resultSchedule = resSchedule }
+            pure $ Right CompileResult
+              { resultIR = ir,
+                resultSchedule = computeScheduleAndBuffers ir }
 
 getSelectedSpans :: [String] -> Config -> [IRSpan]
 getSelectedSpans sel Config {system = ir} = case ir of

@@ -38,7 +38,7 @@ import Network.Socket
 import Options.Applicative
 import Prettyprinter
 import System.IO
-import Visualiser.KLighD (forSyDeIRToGraph)
+import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph)
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
@@ -83,7 +83,7 @@ updateOptions f _clientId =
     ]
 
 -- | Send the graph for layout and display to the LSP client (KLighD-VSCode)
-requestBounds :: FilePath -> T.Text -> IRSystem -> Maybe Schedule -> A.Value
+requestBounds :: FilePath -> T.Text -> IRSystem -> ScheduleStatus -> A.Value
 requestBounds f _clientId ir sched =
   A.object
     [ "clientId" .= _clientId,
@@ -94,6 +94,11 @@ requestBounds f _clientId ir sched =
               .= forSyDeIRToGraph f ir sched
           ]
     ]
+
+toScheduleStatus :: Maybe (Either String Schedule) -> ScheduleStatus
+toScheduleStatus Nothing = ScheduleNotComputed
+toScheduleStatus (Just (Left reason)) = ScheduleFailed (T.pack reason)
+toScheduleStatus (Just (Right sched)) = ScheduleReady sched
 
 diagramOpenInTextEditorMessage :: String -> Int -> Int -> Int -> Int -> A.Value
 diagramOpenInTextEditorMessage uri sline scol eline ecol =
@@ -133,7 +138,6 @@ recomputeModel = do
           LSP.setConfig config
             { system = Just (resultIR compiled),
               schedule = Just (resultSchedule compiled) }
-
 
 -- | The static notification and request handlers we support
 handlers :: LSP.Handlers (LSP.LspM API.Config)
@@ -239,7 +243,7 @@ handlers =
         (Just curFile, Just curId, Just curSystem) ->
           LSP.sendNotification diagramAcceptMethod (setSynthesis curId)
             >> LSP.sendNotification diagramAcceptMethod (updateOptions curFile curId)
-            >> LSP.sendNotification diagramAcceptMethod (requestBounds curFile curId curSystem curSched)
+            >> LSP.sendNotification diagramAcceptMethod (requestBounds curFile curId curSystem (toScheduleStatus curSched))
         _ -> dualLogger <& ("does not have enough information to send diagram: " <> T.show config) `L.WithSeverity` L.Error
     getKey key = \case
       A.Object o -> o !? key
@@ -339,7 +343,7 @@ run (Arguments comm (Host ip) (TCP p) i_f pkgPath) =
       case result of
         Left err -> error (show err)
         Right CompileResult{resultIR = forsydeIR, resultSchedule = sched} -> do
-          let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
+          let graphMessage = requestBounds f "sprotty" forsydeIR (toScheduleStatus (Just sched))
           BSL8.putStrLn $ AP.encodePretty graphMessage
   where
     serverDef =
