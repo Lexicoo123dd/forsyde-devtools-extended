@@ -9,7 +9,7 @@ import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)
 import Test.Hspec
-import Visualiser.KLighD (forSyDeIRToGraph)
+import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph)
 import Visualiser.SKGraphSchema
 
 spec :: Spec
@@ -17,7 +17,7 @@ spec = describe "KLighD diagram synthesis" $ do
   it "preserves graph identity and actor-input-output-edge ordering" $ do
     -- This synthetic path is a test fixture and is never accessed on disk.
     let path = "D:\\example\\path\\model.hs"
-        graph = forSyDeIRToGraph path pipelineModel Nothing
+        graph = forSyDeIRToGraph path pipelineModel ScheduleNotComputed
     graphId graph `shouldBe` filePathToUriText path
     map elementId (rootChildren graph)
       `shouldBe` [ "$root$N$a",
@@ -30,14 +30,23 @@ spec = describe "KLighD diagram synthesis" $ do
                  ]
 
   it "uses signal names before scheduling and buffer sizes afterwards" $ do
-    let unscheduledEdge = findById "$root$N$a$P$s_mid$E$s_mid" $ rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel Nothing
+    let unscheduledEdge = findById "$root$N$a$P$s_mid$E$s_mid" $ rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel ScheduleNotComputed
         schedule = Schedule ([IRString "a", IRString "b"], [(IRString "s_mid", 2)], [])
-        scheduledEdge = findById "$root$N$a$P$s_mid$E$s_mid" $ rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel (Just schedule)
+        scheduledEdge = findById "$root$N$a$P$s_mid$E$s_mid" $ rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel (ScheduleReady schedule)
     edgeLabels unscheduledEdge `shouldBe` ["s_mid", "1", "1"]
     edgeLabels scheduledEdge `shouldBe` ["|s_mid| = 2", "1", "1"]
 
+  it "shows successful and failed schedule diagnostics" $ do
+    let schedule = Schedule ([IRString "a", IRString "b"], [(IRString "s_mid", 2)], [])
+        readyElements = rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel (ScheduleReady schedule)
+        failedElements = rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel (ScheduleFailed "inconsistent rates")
+        readyDiagnostic = findById "$root$N$schedule_status" readyElements
+        failedDiagnostic = findById "$root$N$schedule_status" failedElements
+    nodeLabels readyDiagnostic `shouldBe` ["Schedulable"]
+    nodeLabels failedDiagnostic `shouldBe` ["Unschedulable: inconsistent rates"]
+
   it "renders delay tokens on the delay node and suppresses adjacent buffer labels" $ do
-    let elements = rootChildren $ forSyDeIRToGraph "model.hs" delayModel Nothing
+    let elements = rootChildren $ forSyDeIRToGraph "model.hs" delayModel ScheduleNotComputed
         delayNode = findById "$root$N$delay" elements
         inputEdge = findById "$root$N$a$P$s_delay$E$s_delay" elements
         outputEdge = findById "$root$N$delay$P$s_after$E$s_after" elements
