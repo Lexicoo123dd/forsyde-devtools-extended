@@ -36,10 +36,10 @@ import LSPUri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
+import SDFSchedule (computeScheduleAndBuffers)
 import System.IO
 import Utilities (compileToCoreWithForSyDePath)
-import Visualiser.KLighD (forSyDeIRToGraph)
+import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph)
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
@@ -84,7 +84,7 @@ updateOptions f _clientId =
     ]
 
 -- | Send the graph for layout and display to the LSP client (KLighD-VSCode)
-requestBounds :: FilePath -> T.Text -> IRSystem -> Maybe Schedule -> A.Value
+requestBounds :: FilePath -> T.Text -> IRSystem -> ScheduleStatus -> A.Value
 requestBounds f _clientId ir sched =
   A.object
     [ "clientId" .= _clientId,
@@ -123,7 +123,7 @@ data Config = Config
   { file :: Maybe FilePath,
     clientId :: Maybe T.Text,
     system :: Maybe IRSystem,
-    schedule :: Maybe Schedule,
+    schedule :: ScheduleStatus,
     forSyDePkg :: Maybe FilePath
   }
   deriving (Show)
@@ -134,7 +134,7 @@ defaultConfig =
     { file = Nothing,
       clientId = Nothing,
       system = Nothing,
-      schedule = Nothing,
+      schedule = ScheduleNotComputed,
       forSyDePkg = Nothing
     }
 
@@ -261,7 +261,7 @@ handlers =
         Nothing -> pure ()
         Just ir -> do
           LSP.setConfig config {system = out}
-          sched <- computeScheduleMaybe ir
+          sched <- computeScheduleStatus ir
           LSP.setConfig config {system = out, schedule = sched}
           pure ()
     compileToModelMaybe f = do
@@ -279,12 +279,12 @@ handlers =
               dualLogger <& ("Failed to compile into ForSyDe IR: " <> T.pack e) `L.WithSeverity` L.Error
               pure $ system config
             Right (ir, _) -> pure $ Just ir
-    computeScheduleMaybe ir =
+    computeScheduleStatus ir =
       case computeScheduleAndBuffers ir of
         Left e -> do
           dualLogger <& ("Failed to compute schedule: " <> T.pack e) `L.WithSeverity` L.Error
-          pure Nothing
-        Right sched -> pure . Just $ sched
+          pure . ScheduleFailed $ T.pack e
+        Right sched -> pure . ScheduleReady $ sched
     findSignalSpan :: IRId -> [IRSignal] -> [IRSpan]
     findSignalSpan sig l = mapMaybe match l
       where
@@ -392,10 +392,10 @@ run (Arguments comm (Host ip) (TCP p) i_f pkgPath) =
       let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
             Left e -> error e
             Right v -> v
-      let sched = case computeScheduleAndBuffers forsydeIR of
-            Left e -> error e
-            Right v -> v
-      let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
+      let scheduleStatus = case computeScheduleAndBuffers forsydeIR of
+            Left e -> ScheduleFailed $ T.pack e
+            Right computedSchedule -> ScheduleReady computedSchedule
+      let graphMessage = requestBounds f "sprotty" forsydeIR scheduleStatus
       BSL8.putStrLn $ AP.encodePretty graphMessage
   where
     serverDef =

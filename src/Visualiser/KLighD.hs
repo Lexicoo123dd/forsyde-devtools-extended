@@ -8,7 +8,7 @@
 -- KLighD's graph schema. Keeping the mapping here lets the language server
 -- coordinate protocol messages without also knowing how diagram elements are
 -- rendered or laid out.
-module Visualiser.KLighD (forSyDeIRToGraph) where
+module Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph) where
 
 import Data.Function ((&))
 import qualified Data.Text as T
@@ -17,11 +17,18 @@ import LSPUri (filePathToUriText)
 import SDFSchedule (Schedule (..))
 import SKGraphSchema
 
+-- | Schedule analysis information displayed by the visualiser.
+data ScheduleStatus
+  = ScheduleNotComputed
+  | ScheduleFailed T.Text
+  | ScheduleReady Schedule
+  deriving (Show)
+
 -- | Convert a ForSyDe IR system into the graph representation understood by
--- KLighD. When schedule information is available, signal labels show computed
--- buffer sizes; otherwise they retain their signal names.
-forSyDeIRToGraph :: FilePath -> IRSystem -> Maybe Schedule -> GraphElement
-forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = graph
+-- KLighD. Successful schedule analysis adds buffer sizes and a schedulability
+-- diagnostic; failed analysis preserves the reason in the diagram.
+forSyDeIRToGraph :: FilePath -> IRSystem -> ScheduleStatus -> GraphElement
+forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) scheduleStatus = graph
   where
     -- \| Create a port with a label for signal rate
     createPort parent rends props (n, _) =
@@ -78,12 +85,12 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
       where
         labelId = parent <> "$L$" <> T.show name
         nameLabel = [KLabel {gid = labelId, label = T.show name, properties = [NodeLabelsPlacement [1, 5, 7]]}]
-        labels = case sched of
-          Just (Schedule (_, buffers, _)) ->
+        labels = case scheduleStatus of
+          ScheduleReady (Schedule (_, buffers, _)) ->
             case lookup name buffers of
               Just size -> [KLabel {gid = labelId, label = "|" <> T.show name <> "| = " <> T.show size, properties = [NodeLabelsPlacement [1, 5, 7]]}]
               Nothing -> []
-          Nothing -> nameLabel
+          _ -> nameLabel
 
     -- \| Helper for createNode and global inputs / outputs
     createNode' name nodeLabel nodeRenderings nodeProperties = node
@@ -147,6 +154,22 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
       map createNode actors
         <> map (\name -> createNode' name (Just $ T.show name) [] [LayerConstraint 2]) inputs
         <> map (\name -> createNode' name (Just $ T.show name) [] [LayerConstraint 4]) outputs
+    scheduleDiagnostic =
+      case scheduleStatus of
+        ScheduleNotComputed -> []
+        ScheduleReady _ -> [createScheduleDiagnostic "Schedulable" (KBackgroundColor 170 220 170)]
+        ScheduleFailed reason -> [createScheduleDiagnostic ("Unschedulable: " <> reason) (KBackgroundColor 240 170 170)]
+    createScheduleDiagnostic message background =
+      KNode
+        { gid = "$root$N$schedule_status",
+          children = [KLabel {gid = "$root$N$schedule_status$L$status", label = message, properties = []}],
+          renderings = [KRoundedRectangle [background] 4 4],
+          properties =
+            [ NodeLabelsPlacement [1, 4, 6],
+              NodeSizeConstraints [0, 1, 2, 3],
+              NodeSizeMinimum [160, 40]
+            ]
+        }
     edges = map createEdge signals
     graph =
       KGraph
@@ -154,7 +177,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
           child =
             KNode
               { gid = "$root",
-                children = nodes ++ edges,
+                children = scheduleDiagnostic <> nodes <> edges,
                 properties = [],
                 renderings = []
               },
