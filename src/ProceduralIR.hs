@@ -21,6 +21,7 @@ module ProceduralIR
 where
 
 import Text.Printf (printf)
+import Data.List (intercalate)
 
 data StorageClass
   = Auto
@@ -130,14 +131,6 @@ braces s = "{" ++ s ++ "}"
 quotes :: String -> String
 quotes s = "\"" ++ s ++ "\""
 
-commaSep :: [String] -> String
-commaSep = intercalate ", "
-
-intercalate :: String -> [String] -> String
-intercalate _ [] = ""
-intercalate _ [x] = x
-intercalate sep (x : xs) = x ++ sep ++ intercalate sep xs
-
 indent :: String -> String
 indent = unlines . map ("  " ++) . lines
 
@@ -206,14 +199,14 @@ prettyExpression (ECall name arguments) =
     ++ parens
       ( quotes name
           ++ ", "
-          ++ braces (commaSep (map prettyExpression arguments))
+          ++ braces (intercalate ", " (map prettyExpression arguments))
       )
 prettyExpression (ECallExpr calleeExpression arguments) =
   "ECallExpr"
     ++ parens
       ( prettyExpression calleeExpression
           ++ ", "
-          ++ braces (commaSep (map prettyExpression arguments))
+          ++ braces (intercalate ", " (map prettyExpression arguments))
       )
 prettyExpression (EArrayAccess arrayExpression indexExpression) =
   "EArrayAccess"
@@ -283,7 +276,7 @@ prettyStatement (SArrayDecl arrayType name expressions) =
           ++ ", "
           ++ quotes name
           ++ ", "
-          ++ braces (commaSep (map prettyExpression expressions))
+          ++ braces (intercalate ", " (map prettyExpression expressions))
       )
 prettyStatement (SArrayAssign name index maybeLabel expression) =
   "SArrayAssign"
