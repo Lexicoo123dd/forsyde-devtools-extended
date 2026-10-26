@@ -25,8 +25,8 @@ data ScheduleStatus
   deriving (Show)
 
 -- | Convert a ForSyDe IR system into the graph representation understood by
--- KLighD. Successful schedule analysis adds buffer sizes and a schedulability
--- diagnostic; failed analysis preserves the reason in the diagram.
+-- KLighD. Successful schedule analysis adds buffer sizes, schedulability, and
+-- the actor firing order; failed analysis preserves the reason in the diagram.
 forSyDeIRToGraph :: FilePath -> IRSystem -> ScheduleStatus -> GraphElement
 forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) scheduleStatus = graph
   where
@@ -157,7 +157,10 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
     scheduleDiagnostic =
       case scheduleStatus of
         ScheduleNotComputed -> []
-        ScheduleReady _ -> [createScheduleDiagnostic "Schedulable" (KBackgroundColor 170 220 170)]
+        ScheduleReady (Schedule (firingOrder, _, _)) ->
+          [ createScheduleDiagnostic "Schedulable" (KBackgroundColor 170 220 170),
+            createScheduleNode firingOrder
+          ]
         ScheduleFailed reason -> [createScheduleDiagnostic ("Unschedulable: " <> reason) (KBackgroundColor 240 170 170)]
     createScheduleDiagnostic message background =
       KNode
@@ -168,6 +171,25 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
             [ NodeLabelsPlacement [1, 4, 6],
               NodeSizeConstraints [0, 1, 2, 3],
               NodeSizeMinimum [160, 40]
+            ]
+        }
+    -- Issue #28: keep every firing in the generated order so repeated actors
+    -- remain visible instead of being collapsed into a set of actor names.
+    createScheduleNode firingOrder =
+      KNode
+        { gid = "$root$N$schedule",
+          children =
+            [ KLabel
+                { gid = "$root$N$schedule$L$order",
+                  label = "Schedule: " <> T.intercalate " → " (map T.show firingOrder),
+                  properties = []
+                }
+            ],
+          renderings = [KRoundedRectangle [KBackgroundColor 190 210 245] 4 4],
+          properties =
+            [ NodeLabelsPlacement [1, 4, 6],
+              NodeSizeConstraints [0, 1, 2, 3],
+              NodeSizeMinimum [240, 40]
             ]
         }
     edges = map createEdge signals
