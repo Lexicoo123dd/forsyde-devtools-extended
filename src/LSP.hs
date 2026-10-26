@@ -116,7 +116,9 @@ diagramOpenInTextEditorMessage uri sline scol eline ecol =
                       ]
                 ]
           ],
-      "forceOpen" .= False
+      -- Issue #46: KLighD only opens a non-visible source editor when this is
+      -- true; opening it is required before VS Code can show the selection.
+      "forceOpen" .= True
     ]
 
 data Config = Config
