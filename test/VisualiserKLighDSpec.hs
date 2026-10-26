@@ -36,13 +36,16 @@ spec = describe "KLighD diagram synthesis" $ do
     edgeLabels unscheduledEdge `shouldBe` ["s_mid", "1", "1"]
     edgeLabels scheduledEdge `shouldBe` ["|s_mid| = 2", "1", "1"]
 
-  it "shows successful and failed schedule diagnostics" $ do
-    let schedule = Schedule ([IRString "a", IRString "b"], [(IRString "s_mid", 2)], [])
+  it "shows schedule status, firing order, and failures" $ do
+    let schedule = Schedule ([IRString "a", IRString "b", IRString "b"], [(IRString "s_mid", 2)], [])
         readyElements = rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel (ScheduleReady schedule)
         failedElements = rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel (ScheduleFailed "inconsistent rates")
         readyDiagnostic = findById "$root$N$schedule_status" readyElements
+        scheduleNode = findById "$root$N$schedule" readyElements
         failedDiagnostic = findById "$root$N$schedule_status" failedElements
     nodeLabels readyDiagnostic `shouldBe` ["Schedulable"]
+    -- Issue #28 requires the generated order, including repeated firings.
+    nodeLabels scheduleNode `shouldBe` ["Schedule: a → b → b"]
     nodeLabels failedDiagnostic `shouldBe` ["Unschedulable: inconsistent rates"]
 
   it "renders delay tokens on the delay node and suppresses adjacent buffer labels" $ do
