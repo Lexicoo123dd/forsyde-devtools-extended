@@ -1,16 +1,43 @@
+{-# LANGUAGE LambdaCase #-}
+
 module API
-  ( CompileOptions(..),
+  ( Config(..),
+    defaultConfig,
+    CompileOptions(..),
     CompileError(..),
     CompileResult(..),
     compileFile,
+    getSelectedSpans,
   )
 where
 
 import qualified Control.Exception as E
+import qualified Data.Text as T
+import Data.Maybe (mapMaybe)
 import ForSyDeIR
 import Utilities (compileToCoreWithForSyDePath)
 import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
 import CoreIRToForSyDeIR (translateCoreProgram)
+
+
+data Config = Config
+  { file :: Maybe FilePath,
+    clientId :: Maybe T.Text,
+    system :: Maybe IRSystem,
+    schedule :: Maybe Schedule,
+    forSyDePkg :: Maybe FilePath
+  }
+  deriving (Show)
+
+defaultConfig :: Config
+defaultConfig =
+  Config
+    { file = Nothing,
+      clientId = Nothing,
+      system = Nothing,
+      schedule = Nothing,
+      forSyDePkg = Nothing
+    }
 
 data CompileOptions = CompileOptions
   { forSyDePath :: Maybe FilePath
@@ -44,7 +71,26 @@ compileFile options sourceFile = do
           case computeScheduleAndBuffers ir of
             Left e ->
               pure $ Left $ SchedulingFailed e
-            Right schedule ->
+            Right resSchedule ->
               pure $ Right CompileResult
                 { resultIR = ir,
-                  resultSchedule = schedule }
+                  resultSchedule = resSchedule }
+
+getSelectedSpans :: [String] -> Config -> [IRSpan]
+getSelectedSpans sel Config {system = ir} = case ir of
+  Nothing -> []
+  Just (IRSystem _ procs sigs _) ->
+    let s = mconcat $ findSignalSpan . IRString <$> sel <*> [sigs]
+        a = mconcat $ findProcessSpan . IRString <$> sel <*> [procs]
+     in s <> a
+  where
+    findSignalSpan :: IRId -> [IRSignal] -> [IRSpan]
+    findSignalSpan sig l = mapMaybe match l
+      where
+        match (IRSignal n _ _) = if sig == n then varToSpan n else Nothing
+    findProcessSpan :: IRId -> [IRConstructor] -> [IRSpan]
+    findProcessSpan proc l = mapMaybe match l
+      where
+        match = \case
+          IRDelay n _ _ -> if proc == n then varToSpan n else Nothing
+          IRActor n _ _ _ -> if proc == n then varToSpan n else Nothing

@@ -26,7 +26,7 @@ import Data.Maybe
 import Data.Proxy
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import ForSyDeIR
+import ForSyDeIR (IRSystem)
 import qualified Language.LSP.Logging as LSP
 import qualified Language.LSP.Protocol.Message as LSP
 import qualified Language.LSP.Protocol.Types as LSP
@@ -118,26 +118,7 @@ diagramOpenInTextEditorMessage uri sline scol eline ecol =
       "forceOpen" .= False
     ]
 
-data Config = Config
-  { file :: Maybe FilePath,
-    clientId :: Maybe T.Text,
-    system :: Maybe IRSystem,
-    schedule :: Maybe Schedule,
-    forSyDePkg :: Maybe FilePath
-  }
-  deriving (Show)
-
-defaultConfig :: Config
-defaultConfig =
-  Config
-    { file = Nothing,
-      clientId = Nothing,
-      system = Nothing,
-      schedule = Nothing,
-      forSyDePkg = Nothing
-    }
-
-recomputeModel :: LSP.LspT Config IO ()
+recomputeModel :: LSP.LspT API.Config IO ()
 recomputeModel = do
   config <- LSP.getConfig
   case file config of
@@ -155,7 +136,7 @@ recomputeModel = do
 
 
 -- | The static notification and request handlers we support
-handlers :: LSP.Handlers (LSP.LspM Config)
+handlers :: LSP.Handlers (LSP.LspM API.Config)
 handlers =
   mconcat
     [ LSP.notificationHandler LSP.SMethod_Initialized $ \_not -> pure (),
@@ -234,7 +215,7 @@ handlers =
         -- Get location information on selected object
         config <- LSP.getConfig
         let sel = getSelected p & map (T.split (\_c -> _c == '$')) & map last & map T.unpack
-        let spans = getSelectedSpans sel config
+        let spans = API.getSelectedSpans sel config
         if length spans > 0
           then liftIO $ stderrLogger <& ("Selected: " <> T.show spans) `L.WithSeverity` L.Debug
           else pure ()
@@ -251,31 +232,15 @@ handlers =
         pure ()
     ]
   where
-    getSelectedSpans sel Config {system = ir} = case ir of
-      Nothing -> []
-      Just (IRSystem _ procs sigs _) ->
-        let s = findSignalSpan . IRString <$> sel <*> [sigs] & mconcat
-            a = findProcessSpan . IRString <$> sel <*> [procs] & mconcat
-         in s <> a
-    sendModel :: LSP.LspT Config IO ()
+    sendModel :: LSP.LspT API.Config IO ()
     sendModel = do
-      config@Config {file = f, clientId = c, system = s, schedule = curSched} <- LSP.getConfig
+      config@API.Config {file = f, clientId = c, system = s, schedule = curSched} <- LSP.getConfig
       case (f, c, s) of
         (Just curFile, Just curId, Just curSystem) ->
           LSP.sendNotification diagramAcceptMethod (setSynthesis curId)
             >> LSP.sendNotification diagramAcceptMethod (updateOptions curFile curId)
             >> LSP.sendNotification diagramAcceptMethod (requestBounds curFile curId curSystem curSched)
         _ -> dualLogger <& ("does not have enough information to send diagram: " <> T.show config) `L.WithSeverity` L.Error
-    findSignalSpan :: IRId -> [IRSignal] -> [IRSpan]
-    findSignalSpan sig l = mapMaybe match l
-      where
-        match (IRSignal n _ _) = if sig == n then varToSpan n else Nothing
-    findProcessSpan :: IRId -> [IRConstructor] -> [IRSpan]
-    findProcessSpan proc l = mapMaybe match l
-      where
-        match = \case
-          IRDelay n _ _ -> if proc == n then varToSpan n else Nothing
-          IRActor n _ _ _ -> if proc == n then varToSpan n else Nothing
     getKey key = \case
       A.Object o -> o !? key
       _ -> Nothing
@@ -332,13 +297,13 @@ formatOut (L.WithSeverity m s) =
 stderrLogger :: L.LogAction IO (L.WithSeverity T.Text)
 stderrLogger = L.cmap formatOut L.logStringStderr
 
-clientLogger :: L.LogAction (LSP.LspM Config) (L.WithSeverity T.Text)
+clientLogger :: L.LogAction (LSP.LspM API.Config) (L.WithSeverity T.Text)
 clientLogger = LSP.defaultClientLogger
 
-dualLogger :: L.LogAction (LSP.LspM Config) (L.WithSeverity T.Text)
+dualLogger :: L.LogAction (LSP.LspM API.Config) (L.WithSeverity T.Text)
 dualLogger = clientLogger <> L.hoistLogAction liftIO stderrLogger
 
-runServerC :: Handle -> Handle -> LSP.ServerDefinition Config -> IO Int
+runServerC :: Handle -> Handle -> LSP.ServerDefinition API.Config -> IO Int
 runServerC =
   LSP.runServerWithHandles
     (L.cmap (fmap logToText) stderrLogger)
@@ -379,9 +344,9 @@ run (Arguments comm (Host ip) (TCP p) i_f pkgPath) =
   where
     serverDef =
       LSP.ServerDefinition
-        { parseConfig = const $ const $ Right defaultConfig {forSyDePkg = pkgPath},
+        { parseConfig = const $ const $ Right API.defaultConfig {forSyDePkg = pkgPath},
           onConfigChange = const $ pure (),
-          defaultConfig = defaultConfig {forSyDePkg = pkgPath},
+          defaultConfig = API.defaultConfig {forSyDePkg = pkgPath},
           configSection = "demo",
           doInitialize = \env _req -> pure $ Right env,
           staticHandlers = \_caps -> handlers,
