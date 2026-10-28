@@ -15,7 +15,7 @@ module ForSyDeIR
     prettyIRJSON,
     IRId (..),
     IRSpan,
-    varToSpan,
+    irIdToSpan,
   )
 where
 
@@ -71,8 +71,8 @@ prettyIRId = show . show
 
 type IRSpan = (String, Int, Int, Int, Int)
 
-varToSpan :: IRId -> Maybe IRSpan
-varToSpan v =
+irIdToSpan :: IRId -> Maybe IRSpan
+irIdToSpan v =
   irVarToVar v
     >>= varToRealSrcSpan
     >>= \l ->
@@ -151,7 +151,7 @@ prettyIRSignal (IRSignal signalId (inputId, inputRate) (outputId, outputRate)) =
     inputRate
     (show outputId)
     outputRate
-    (maybe "" prettyIRSpan $ varToSpan signalId)
+    (maybe "" prettyIRSpan $ irIdToSpan signalId)
 
 prettyIRConstructor :: IRConstructor -> String
 prettyIRConstructor (IRDelay delayId tokens (input, output)) =
@@ -161,7 +161,7 @@ prettyIRConstructor (IRDelay delayId tokens (input, output)) =
     (intercalate ", " (map show tokens))
     (prettyIRId input)
     (prettyIRId output)
-    (maybe "" prettyIRSpan $ varToSpan delayId)
+    (maybe "" prettyIRSpan $ irIdToSpan delayId)
 prettyIRConstructor (IRActor actorId actorType functionId (inputs, outputs)) =
   printf
     "IRActor(\"%s\", %s, \"%s\", {%s}, {%s}, %s)"
@@ -170,7 +170,7 @@ prettyIRConstructor (IRActor actorId actorType functionId (inputs, outputs)) =
     (show functionId)
     (intercalate ", " (map prettyIRId inputs))
     (intercalate ", " (map prettyIRId outputs))
-    (maybe "" prettyIRSpan $ varToSpan actorId)
+    (maybe "" prettyIRSpan $ irIdToSpan actorId)
 
 prettyIRFunction :: DynFlags -> IRFunction -> String
 prettyIRFunction dflags (IRFunction functionId function) =
@@ -178,7 +178,7 @@ prettyIRFunction dflags (IRFunction functionId function) =
     "IRFunction(\"%s\", %s, %s)"
     (show functionId)
     (maybe "" (prettyFunction dflags) function)
-    (maybe "" prettyIRSpan $ varToSpan functionId)
+    (maybe "" prettyIRSpan $ irIdToSpan functionId)
 
 prettyFunction :: DynFlags -> CoreExpr -> String
 prettyFunction dflags function = printf "\n%s" (indent 2 (prettyCoreExpr dflags function))
