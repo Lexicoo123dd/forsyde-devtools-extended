@@ -2,22 +2,13 @@ module CoreIR where
 
 import Data.List (intercalate)
 import GHC
-import GHC.Builtin.Uniques (knownUniqueName)
 import GHC.Core
 import GHC.Driver.Ppr
-import GHC.Plugins (Literal, Var (varName), litValue, nameStableString, occName, occNameString, varUnique)
+import GHC.Plugins (Literal, Var, litValue)
 import Text.Printf (printf)
 
 indent :: String -> String
 indent = unlines . map ("  " ++) . lines
-
-varToString :: Var -> String
-varToString var =
-  let stringName = occNameString $ occName $ varName var
-      maybeUniqueName = knownUniqueName $ varUnique var
-   in case maybeUniqueName of
-        Just uniqueName -> stringName ++ nameStableString uniqueName
-        Nothing -> stringName
 
 literalToInt :: Literal -> Int
 literalToInt literal = fromIntegral $ litValue literal

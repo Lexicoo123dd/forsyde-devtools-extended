@@ -19,7 +19,7 @@ module ForSyDeIR
   )
 where
 
-import CoreIR (prettyCoreExpr, varToString)
+import CoreIR (prettyCoreExpr)
 import Data.Aeson
 import Data.Aeson.Encode.Pretty
 import Data.Function
@@ -29,9 +29,10 @@ import qualified Data.Text as Text
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Builder as TLB
 import GHC (DynFlags)
+import GHC.Builtin.Uniques (knownUniqueName)
 import GHC.Core
 import qualified GHC.Data.FastString as FS
-import GHC.Plugins (Var, nameSrcSpan, varName, varUnique)
+import GHC.Plugins (Var (varName), nameSrcSpan, varName, varUnique, nameStableString, occName, occNameString)
 import GHC.Types.SrcLoc
 import Text.Printf (printf)
 
@@ -56,6 +57,14 @@ instance Eq IRId where
   (==) _ Empty = False
   (==) (IRString a) b = a == show b
   (==) a (IRString b) = show a == b
+
+varToString :: Var -> String
+varToString var =
+  let stringName = occNameString $ occName $ varName var
+      maybeUniqueName = knownUniqueName $ varUnique var
+   in case maybeUniqueName of
+        Just uniqueName -> stringName ++ nameStableString uniqueName
+        Nothing -> stringName
 
 prettyIRId :: IRId -> String
 prettyIRId = show . show
