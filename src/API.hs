@@ -15,7 +15,7 @@ import qualified Control.Exception as E
 import qualified Data.Text as T
 import Data.Maybe (mapMaybe)
 import ForSyDeIR
-import Utilities (compileToCoreWithForSyDePath)
+import GHCCoreAPI (compileToCoreWithForSyDePath)
 import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
 import CoreIRToForSyDeIR (translateCoreProgram)
 

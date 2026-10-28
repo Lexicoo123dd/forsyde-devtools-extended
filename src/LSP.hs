@@ -372,7 +372,7 @@ runTCPServer host port server = withSocketsDo $ do
       withFdSocket sock setCloseOnExecIfNeeded
       bind sock $ addrAddress addr
       listen sock 1024
-      return sock
+      pure sock
     loop sock = forever $
       E.bracketOnError (accept sock) (close . fst) $
         \(conn, _peer) ->

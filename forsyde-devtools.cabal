@@ -24,7 +24,6 @@ common common-options
     co-log-core == 0.3.2.7,
     containers == 0.7,
     filepath == 1.5.4.0,
-    forsyde-atom >=0.3.2 && <=0.3.3,
     forsyde-shallow ==3.5.0.0,
     ghc == 9.10.3,
     ghc-paths == 0.1.0.12,
@@ -47,6 +46,7 @@ library
     CoreIRToProceduralIR
     ForSyDeIR
     ForSyDeIRToProceduralIR
+    GHCCoreAPI
     LSPUri
     ProceduralIR
     ProceduralIRToC
@@ -76,6 +76,7 @@ executable forsyde-compiler-exe
     CoreIRToProceduralIR
     ForSyDeIR
     ForSyDeIRToProceduralIR
+    GHCCoreAPI
     ProceduralIR
     ProceduralIRToC
     SDFSchedule
@@ -96,6 +97,7 @@ executable forsyde-lsp-exe
     CoreIR
     CoreIRToForSyDeIR
     ForSyDeIR
+    GHCCoreAPI
     LSPUri
     ProceduralIR
     SDFSchedule
