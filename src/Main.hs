@@ -1,6 +1,6 @@
 module Main where
 
-import ArgumentsMain
+import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments)
 import CoreIR (prettyCoreProgram)
 import CoreIRToForSyDeIR (translateCoreProgram)
 import ForSyDeIR (prettyIRJSON, prettyIRSystem)
@@ -62,61 +62,44 @@ generateDefaultFileName f OutputProceduralIR = f ++ ".pir"
 generateDefaultFileName f OutputSchedule = f ++ ".sched"
 
 -- Main function for running after arguments have been returned from main.
--- Need to pattern match based on the arguments used. They are matched on
--- manually since a lot of combinations are invalid.
+-- Pattern matches on the requested output type to determine which stages
+-- of the compilation pipeline are required.
+-- They are matched on manually since a lot of combinations are invalid.
 -- You can't for intance start with procedural IR as input and go to Core
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
--- "--output-core"
-run (Arguments (InputFile input_file) output_file OutputCore _ _ _ pkgPath) = do
+run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath) = do
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  write_output output_file OutputCore (prettyCoreProgram dflags core)
--- "--output-forsyde-ir"
-run (Arguments (InputFile input_file) output_file OutputForSyDeIR _ _ _ pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  write_output output_file OutputForSyDeIR (prettyIRSystem dflags forsydeIR)
--- "--output-forsyde-ir-json"
-run (Arguments (InputFile input_file) output_file OutputForSyDeIRJSON _ _ _ pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  let ir_json = prettyIRJSON forsydeIR
-  write_output output_file OutputForSyDeIRJSON ir_json
--- "--output-schedule"
-run (Arguments (InputFile input_file) output_file OutputSchedule _ _ _ pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, _) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  write_output output_file OutputSchedule (computeScheduleAndBuffersPrint forsydeIR)
--- "--output-procedural-ir"
-run (Arguments (InputFile input_file) output_file OutputProceduralIR _ inputType r pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffers forsydeIR of
-        Left e -> error e
-        Right v -> v
-  let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
-  write_output output_file OutputProceduralIR (prettyProgram proceduralIR)
--- "--output-c"
-run (Arguments (InputFile input_file) output_file OutputC t inputType r pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffers forsydeIR of
-        Left e -> error e
-        Right v -> v
-  let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
-  let c = translateProgram proceduralIR t inputType True
-  write_output output_file OutputC c
+  let outputIR = case outputType of
+        OutputCore ->
+          prettyCoreProgram dflags core
+        OutputForSyDeIR -> do
+          let (forsydeIR, _) = translateCoreHelper dflags core
+          prettyIRSystem dflags forsydeIR
+        OutputForSyDeIRJSON -> do
+          let (forsydeIR, _) = translateCoreHelper dflags core
+          prettyIRJSON forsydeIR
+        OutputSchedule -> do
+          let (forsydeIR, _) = translateCoreHelper dflags core
+          computeScheduleAndBuffersPrint forsydeIR
+        OutputProceduralIR -> do
+          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
+          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
+          prettyProgram $ translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
+        OutputC -> do
+          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
+          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
+          let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
+          translateProgram proceduralIR target inputType True
+  write_output output_file outputType outputIR
+  where
+    translateCoreHelper dflags core = case translateCoreProgram dflags core of
+      Left e -> error e
+      Right v -> v
+    computeScheduleHelper forsydeIR = case computeScheduleAndBuffers forsydeIR of
+      Left e -> error e
+      Right (Schedule v) -> v
 
 main :: IO ()
 main = run =<< execParser opts
