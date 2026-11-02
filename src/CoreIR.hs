@@ -5,7 +5,7 @@ import GHC
 import GHC.Builtin.Uniques (knownUniqueName)
 import GHC.Core
 import GHC.Driver.Ppr
-import GHC.Plugins (Literal, Var (varName), litValue, nameStableString, occName, occNameString, varUnique)
+import GHC.Plugins (Var (varName), nameStableString, occName, occNameString, varUnique)
 import Text.Printf (printf)
 
 indent :: String -> String
@@ -18,9 +18,6 @@ varToString var =
    in case maybeUniqueName of
         Just uniqueName -> stringName ++ nameStableString uniqueName
         Nothing -> stringName
-
-literalToInt :: Literal -> Int
-literalToInt literal = fromIntegral $ litValue literal
 
 prettyCoreBind :: DynFlags -> CoreBind -> String
 prettyCoreBind dflags bind = case bind of

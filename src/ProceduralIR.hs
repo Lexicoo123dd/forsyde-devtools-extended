@@ -78,6 +78,8 @@ data Type
 data Expression
   = EVar String
   | EInt Int
+  | EBool Bool
+  | EFloat Float
   | EChar Char
   | EString String
   | EBinOp BinaryOperator Expression Expression
@@ -183,6 +185,8 @@ prettyType currentType = case currentType of
 prettyExpression :: Expression -> String
 prettyExpression (EVar x) = "EVar" ++ parens (quotes x)
 prettyExpression (EInt i) = "EInt" ++ parens (show i)
+prettyExpression (EFloat f) = "EFloat" ++ parens (show f)
+prettyExpression (EBool b) = "EBool" ++ parens (show b)
 prettyExpression (EChar c) = "EChar" ++ parens (show c)
 prettyExpression (EString s) = "EString" ++ parens (show s)
 prettyExpression (EBinOp bop expressionA expressionB) =

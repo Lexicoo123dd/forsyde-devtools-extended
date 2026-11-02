@@ -62,6 +62,8 @@ translateType currentType = case currentType of
 translateExpression :: Expression -> String
 translateExpression (EVar x) = x
 translateExpression (EInt i) = show i
+translateExpression (EFloat f) = show f
+translateExpression (EBool b) = show b
 translateExpression (EChar c) = show c
 translateExpression (EString s) = show s
 translateExpression (EBinOp bop exprA exprB) =
