@@ -420,7 +420,7 @@ createDelaySDF context binder expr =
 
 createActorSDF :: TranslationContext -> ActorType -> CoreBndr -> CoreExpr -> Either String TranslationContext
 createActorSDF initialContext actorType binder expr =
-  let lits = getLits expr []
+  let lits = getRates expr
       maybeFunctionName = getFunctionName initialContext expr
    in case maybeFunctionName of
         Nothing -> Left "createActorSDF - No function found for actor"
@@ -436,13 +436,21 @@ createActorSDF initialContext actorType binder expr =
 
 -- | Helper function for `createDelaySDF` and `createActorSDF` which returns
 -- all integer literals within their expression as a list.
-getLits :: CoreExpr -> [Int] -> [Int]
+getLits :: CoreExpr -> [IRLiteral] -> [IRLiteral]
 getLits expr acc = case expr of
-  Lit l -> (literalToInt l) : acc
+  Lit l ->
+    case coreLiteralToIR l of
+      Just irLit -> irLit : acc
+      Nothing -> acc
   App e a -> getLits e (getLits a acc)
   Lam _ e -> getLits e acc
   Let _ e -> getLits e acc
   _ -> acc
+
+-- Extract integer values for rates.
+getRates :: CoreExpr -> [Int]
+getRates expr =
+  [n | IRInt n <- getLits expr []]
 
 -- | Helper function for `createActorSDF` which returns the index to split the
 -- literals within an actor expression based on the actor type.

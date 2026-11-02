@@ -5,7 +5,7 @@
 
 module Compiler.CoreIRToProceduralIR where
 
-import Compiler.CoreIR (literalToInt, prettyCoreAlt)
+import Compiler.CoreIR (prettyCoreAlt)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
 import Data.List (elemIndex)
@@ -31,6 +31,8 @@ data TranslationContext = TranslationContext
 data FunctionContent
   = FVar Var
   | FInt Int
+  | FFloat Float
+  | FBool Bool
   | FCons
   | FTuple
   | FEmptyList
@@ -39,6 +41,13 @@ data FunctionContent
   | FMultiply
   | FDiv
   | FNegate
+
+translate :: IRLiteral -> FunctionContent
+translate literal =
+  case literal of
+    IRInt n -> FInt n
+    IRFloat f -> FFloat f
+    IRBool b -> FBool b
 
 initialTranslationContext :: DynFlags -> TranslationContext
 initialTranslationContext dflags =
@@ -205,7 +214,9 @@ translateOutputExprToFunctionContentList context expr acc = case expr of
     _ -> case lookup (IRVar varId) (functionVariables context) of
       Just _ -> FVar varId : acc
       Nothing -> acc
-  Lit i -> FInt (literalToInt i) : acc
+  Lit i -> case coreLiteralToIR i of
+    Just irLit -> translate irLit : acc
+    Nothing -> acc
   _ -> acc
 
 -- | Translates a `FunctionContent` list into a Procedural IR scope.
@@ -253,6 +264,16 @@ translateFunctionContent context contentList =
             newExprList = expr : exprList
             exprsStack2 = push newExprList exprsStack1
          in exprsStack2
+      (FFloat f) ->
+        let (exprList, exprsStack1) = case (pop exprsStack) of
+              Nothing -> error "translateFunctionContent - empty expression stack when popping"
+              Just (elist, stack1) -> (elist, stack1)
+            expr = EFloat f
+            newExprList = expr : exprList
+            exprsStack2 = push newExprList exprsStack1
+         in exprsStack2
+      -- TODO: Need to decide how floats should be handeled
+      (FBool b) -> undefined
       (FVar varId) ->
         let (exprList, exprsStack1) = case (pop exprsStack) of
               Nothing -> error "translateFunctionContent - empty expression stack when popping"

@@ -157,6 +157,20 @@ translateBuffer initialContext (bufferId, bufferSize) =
             else
               initialContext {initBuffers = initStmt : initBuffers initialContext, freeBuffers = freeStmt : freeBuffers initialContext}
 
+irLiteralToExpression :: IRLiteral -> Expression
+irLiteralToExpression literal =
+  case literal of
+    IRInt n -> EInt n
+    IRFloat f -> EFloat f
+    IRBool b -> EBool b
+
+irLiteralToFormat :: IRLiteral -> String
+irLiteralToFormat literal =
+  case literal of
+    IRInt _ -> "%d\n"
+    IRFloat _ -> "%f\n"
+    IRBool _ -> "%d\n"
+
 -- | Translates an `IRConstructor` into a set of statements which are used to
 -- update the `TranslationContext`.
 translateIRConstructor :: TranslationContext -> IRConstructor -> TranslationContext
@@ -167,13 +181,13 @@ translateIRConstructor initialContext constructor = case constructor of
     let maybeBufferId = lookup outputSignal (delayBuffers initialContext)
      in case maybeBufferId of
           Just bufferId ->
-            let foldDelayTokens :: [Statement] -> Int -> [Statement]
+            let foldDelayTokens :: [Statement] -> IRLiteral -> [Statement]
                 foldDelayTokens acc token =
                   let stmt =
                         if elem bufferId (systemOutputs initialContext)
                           -- TODO: Match the output with the actor on the signal
-                          then SExpr (ECall "printf" [EString "%d\n", EInt token])
-                          else SExpr (ECall "write_token" [EVar $ show bufferId, EInt token])
+                          then SExpr (ECall "printf" [EString (irLiteralToFormat token), irLiteralToExpression token])
+                          else SExpr (ECall "write_token" [EVar $ show bufferId, irLiteralToExpression token])
                    in (stmt : acc)
                 delayStmts = (foldl' foldDelayTokens [] tokens)
              in initialContext {initDelay = delayStmts ++ initDelay initialContext}

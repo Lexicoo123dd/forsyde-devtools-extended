@@ -16,6 +16,8 @@ module Compiler.ForSyDeIR
     IRId (..),
     IRSpan,
     irIdToSpan,
+    IRLiteral (..),
+    coreLiteralToIR,
   )
 where
 
@@ -32,7 +34,7 @@ import GHC (DynFlags)
 import GHC.Builtin.Uniques (knownUniqueName)
 import GHC.Core
 import qualified GHC.Data.FastString as FS
-import GHC.Plugins (Var (varName), nameSrcSpan, varName, varUnique, nameStableString, occName, occNameString)
+import GHC.Plugins (LitNumType (LitNumInt), Literal (LitFloat, LitNumber), Var (varName), nameSrcSpan, varName, varUnique, nameStableString, occName, occNameString)
 import GHC.Types.SrcLoc
 import Text.Printf (printf)
 
@@ -42,6 +44,22 @@ data IRId
   = IRVar Var
   | IRString String
   | Empty
+
+data IRLiteral
+  = IRInt Int
+  | IRFloat Float
+  | IRBool Bool
+  deriving (Show, Eq)
+
+coreLiteralToIR :: Literal -> Maybe IRLiteral
+coreLiteralToIR lit =
+  case lit of
+    LitNumber LitNumInt n ->
+      Just (IRInt (fromIntegral n))
+    LitFloat f ->
+      Just (IRFloat (fromRational f))
+    _ ->
+      Nothing
 
 instance Show IRId where
   show :: IRId -> String
@@ -125,7 +143,7 @@ data ActorType
 -- IRDelay(delayId, tokens, (inputSignal, outputSignal))
 -- IRActor(actorId, actorType, functionId (inputSignals, outputSignals))
 data IRConstructor
-  = IRDelay IRId [Int] (IRId, IRId)
+  = IRDelay IRId [IRLiteral] (IRId, IRId)
   | IRActor IRId ActorType IRId ([IRId], [IRId])
 
 -- IRSignal(signalId (sourceId, sourceRate) (targetId, targetRate))
@@ -206,6 +224,14 @@ instance Show IRSystem where
 
 instance ToJSON ActorType where
   toJSON a = String $ Text.pack $ show a
+
+instance ToJSON IRLiteral where
+  toJSON (IRInt n) =
+    object ["type" .= ("Int" :: Text.Text), "value" .= n]
+  toJSON (IRFloat f) =
+    object ["type" .= ("Float" :: Text.Text), "value" .= f]
+  toJSON (IRBool b) =
+    object ["type" .= ("Bool" :: Text.Text), "value" .= b]
 
 instance ToJSON IRConstructor where
   toJSON (IRDelay name tokens (_, _)) =
