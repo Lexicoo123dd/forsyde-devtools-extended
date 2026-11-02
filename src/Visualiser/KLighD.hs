@@ -181,7 +181,8 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
           children =
             [ KLabel
                 { gid = "$root$N$schedule$L$order",
-                  label = "Schedule: " <> T.intercalate " → " (zipWith formatFiring [1 :: Int ..] firingOrder),
+                -- fix: remove the number before schedule tag
+                  label = "Schedule: " <> T.intercalate " → " (map T.show firingOrder),
                   properties = []
                 }
             ],
@@ -192,7 +193,8 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
               NodeSizeMinimum [240, 40]
             ]
         }
-    formatFiring position actorName = T.show position <> ". " <> T.show actorName
+    -- fix: remove the number before schedule tag
+    -- formatFiring position actorName = T.show position <> ". " <> T.show actorName
     edges = map createEdge signals
     graph =
       KGraph

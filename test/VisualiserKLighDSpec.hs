@@ -45,7 +45,7 @@ spec = describe "KLighD diagram synthesis" $ do
         failedDiagnostic = findById "$root$N$schedule_status" failedElements
     nodeLabels readyDiagnostic `shouldBe` ["Schedulable"]
     -- Issue #28 requires the generated order, including repeated firings.
-    nodeLabels scheduleNode `shouldBe` ["Schedule: 1. a → 2. b → 3. b"]
+    nodeLabels scheduleNode `shouldBe` ["Schedule: a → b → b"]
     nodeLabels failedDiagnostic `shouldBe` ["Unschedulable: inconsistent rates"]
 
   it "renders delay tokens on the delay node and suppresses adjacent buffer labels" $ do
