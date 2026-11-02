@@ -153,6 +153,15 @@ outputFormatC =
         <> help "Output file in C (default)"
     )
 
+outputFormatCMCPOC :: Parser OutputFormat
+outputFormatCMCPOC =
+  flag
+    OutputCMC
+    OutputCMC
+    ( long "output-c-mc"
+        <> help "Output file in C multi-core"
+    )
+
 outputFormatCore :: Parser OutputFormat
 outputFormatCore =
   flag'

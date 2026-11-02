@@ -69,7 +69,8 @@ generateDefaultFileName f OutputSchedule = f ++ ".sched"
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
-run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath) = do
+-- "Normal run"
+run (Arguments (InputFile input_file) output_file OutputC t inputType r pkgPath) = do
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
   let outputIR = case outputType of
         OutputCore ->
