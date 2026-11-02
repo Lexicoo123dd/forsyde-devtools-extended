@@ -7,6 +7,42 @@ import Data.List (elemIndex, find, intercalate, nub)
 import Data.Ratio (denominator, numerator)
 import ForSyDeIR
 import GHC.Generics (Generic)
+import qualified Data.Vector as V
+
+createAcyclicPresedenceGraph :: [Actor] -> [Edge] -> [[Integer]] -> ([(IRId, Int)], [(IRId, IRId)] )
+createAcyclicPresedenceGraph actors edges matrix = do 
+  let
+    -- b(0)
+    initBuffers = map initTokens edges
+    -- repetition vector with size of size number of actors
+    q :: V.Vector Int
+    q = V.replicate (length actors) 0
+    -- list of actor + instance, eg [(Actor_1, 1), (Actor_1, 2), (Actor_2, 1), ... ]
+
+    graph = helperAPG initbuffers q actors edges matrix [] []
+  
+
+helperAPG :: [Integer] -> V.Vector Int -> [Actor] -> [Edge] -> [[Integer]] -> [(IRId, Int)] -> [(IRId, IRId)] -> ([(IRId, Int)], [(IRId, IRId)])
+helperAPG currentBuffer q actors edges matrix presActorInstances presEdges = do 
+
+
+-- FOR EACH input edge a OF α:
+--
+--                     η = producer(actor connected by a)
+--
+--                     d = compute_distance(a, q, b)  # Equation (7)
+--                     d = MAX(0, d)
+--
+--                     # The first d instances of η must precede x
+--                     FOR j = 1 TO d:
+--                         IF (η, j) EXISTS IN V_G:
+--                             ADD EDGE ((η, j), x) TO E_G
+
+
+
+-- check if runnable 
+isNodeRunnable :: [Integer] -> [Actor] -> [[Integer]] -> Bool
+
 
 -- | Convert ForSyDe IR to SDF data structures
 convertIRSystem :: IRSystem -> Either String ([Actor], [Edge])
@@ -534,49 +570,200 @@ verifySchedule actors edges initialTokens schedule _repetitionCounts =
 -- Library Function: compute schedule & buffer sizes
 ----------------------------------------------------------
 
+-- | Represents a complete schedule for an IR system, including the order
+--   in which actors execute, the sizes of all required buffers, and the
+--   mappings between original signals and their corresponding delay buffers.
+--
+--   The first list contains the actor identifiers in their execution order.
+--   An actor may appear multiple times if it must execute more than once
+--   to satisfy the repetition vector of the graph.
+--
+--   The second list contains pairs of buffer identifiers and their required
+--   capacities, expressed as integer sizes.
+--
+--   The third list contains pairs mapping an original signal identifier
+--   to the identifier of the delay buffer associated with that signal.
 newtype Schedule = Schedule ([IRId], [(IRId, Int)], [(IRId, IRId)])
   deriving (Show)
 
--- | Returns schedule as actor names, buffer sizes, and delay buffer mappings
--- Returns: (schedule_order, [(buffer_name, buffer_size)], [(original_signal, delay_buffer_name)])
+-- | Computes a valid actor execution schedule and determines the buffer
+--   sizes and delay buffer mappings required by an IR system.
+--
+--   The function first converts the input IR system into a collection
+--   of actors and edges. It then handles two cases:
+--
+--   1. The graph has no internal edges. In this case, every actor executes
+--      exactly once, and no internal edge buffers are required.
+--
+--   2. The graph has internal edges. In this case, the function constructs
+--      a topology matrix and checks its rank. If the rank satisfies the
+--      required condition, it calculates a repetition vector, verifies
+--      that vector, generates a valid execution schedule, simulates buffer
+--      usage, and computes the input/output buffer sizes and aliases.
+--
+--   The function returns either an error message explaining why a schedule
+--   could not be computed or a Schedule containing the actor execution
+--   order, buffer sizes, and delay buffer mappings.
+--
+--   Arguments:
+--     irSystem - The intermediate representation of the system to schedule.
+--
+--   Returns:
+--     Right Schedule - The computed schedule, buffer sizes, and mappings.
+--     Left String    - An error message if the schedule cannot be computed.
 computeScheduleAndBuffers :: IRSystem -> Either String Schedule
 computeScheduleAndBuffers irSystem = do
+  -- Convert the IR system into its constituent actors and edges.
+  -- The conversion may fail, in which case the error is propagated
+  -- through the Either monad.
   (actors, edges) <- convertIRSystem irSystem
+
+  -- Check whether the graph contains any internal edges.
+  -- An edge represents an internal signal connection between actors.
   if null edges
     then
       -- If there are no internal edges, fire all actor once, no buffer required
+      -- Obtain the name of each actor in the order in which it appears.
+      -- Since there are no internal dependencies to schedule, each actor
+      -- needs to execute exactly once.
       let schedNames = map name actors
+
+          -- Associate every actor name with a repetition count of one.
+          -- These counts are used when calculating the input/output buffers.
           repsWithNames = zip (map name actors) (replicate (length actors) 1)
+
+          -- Create buffer entries for all internal edges.
+          -- Because the edge list is empty in this branch, this produces
+          -- an empty list of internal buffer sizes.
           internalBufSizes = zip (map edgeName edges) (replicate (length edges) 0)
        in do
+            -- Calculate the buffer sizes required for the system's inputs
+            -- and outputs, using the repetition counts computed above.
+            -- Also obtain the aliases mapping signals to their associated
+            -- buffers, as determined by the I/O buffer calculation.
             (ioBufSizes, aliases) <- computeIOBufferSizes irSystem repsWithNames
+
+            -- Construct the final schedule.
+            -- The schedule contains each actor exactly once, the computed
+            -- I/O buffer sizes followed by the internal buffer sizes, and
+            -- the signal-to-buffer aliases.
             pure $ Schedule (schedNames, ioBufSizes ++ internalBufSizes, aliases)
+
     else
+      -- When internal edges exist, construct the topology matrix that
+      -- describes the relationships between actors and edges.
+      -- This matrix is subsequently used to calculate the repetition vector.
       let mat = buildTopologyMatrixEdgesRows actors edges
+
+          -- Compute the rank of the topology matrix.
+          -- The rank is used to determine whether the graph satisfies
+          -- the structural condition required by this scheduling algorithm.
           rankMat = matrixRank mat
-       in if rankMat == length actors - 1
-            then case nullspaceBasis mat of
+       in
+        -- Require the matrix rank to equal the number of actors minus one.
+        -- If this condition is not satisfied, the repetition vector cannot
+        -- be computed using the method implemented below.
+        if rankMat == length actors - 1
+            then
+              -- Find a basis for the null space of the topology matrix.
+              -- A vector in this null space satisfies the balance equations
+              -- represented by the matrix and can therefore serve as the
+              -- basis for deriving actor repetition counts.
+              case nullspaceBasis mat of
+
+              -- If the null space has no basis vectors, there is no vector
+              -- available from which to construct a repetition vector.
               [] -> Left "No repetition vector found: null space is empty."
+
+              -- Use the first basis vector to derive the repetition vector.
+              -- The resulting vector is converted to minimal integer values
+              -- so that the actor counts can be used for scheduling.
               (basisVec : _) ->
-                let repInt = toMinimalIntegers basisVec
+                let
+                    -- Convert the selected null-space basis vector into
+                    -- a minimal integer vector.
+                    -- This gives integer repetition counts while preserving
+                    -- the proportional relationships between the entries.
+                    repInt = toMinimalIntegers basisVec
 
                     -- Verification
+                    -- Multiply the topology matrix by the proposed repetition
+                    -- vector and check whether every resulting entry is zero.
+                    -- A zero result means the vector satisfies the balance
+                    -- equations represented by the topology matrix.
                     isZeroVector = all (== 0) (multiplyMatrixVector mat repInt)
 
+                    -- Determine the final result by checking the validity
+                    -- of the repetition vector before constructing a schedule.
                     finalResult
+                      -- Reject the vector if it does not belong to the
+                      -- null space of the topology matrix.
                       | not isZeroVector = Left "Verification failed: repetition vector is not in null space"
+
+                      -- Reject the vector if any actor has a repetition count
+                      -- less than or equal to zero. A valid repetition vector
+                      -- for this graph must contain only strictly positive
+                      -- repetition counts.
                       | any (<= 0) repInt = Left "Cannot compute a strictly positive repetition vector for this graph."
+
+                      -- Continue with schedule construction only after the
+                      -- repetition vector passes both verification checks.
                       | otherwise =
-                          let repCounts = map fromIntegral repInt :: [Int]
+                          let
+                              -- Convert the integer repetition counts into
+                              -- Int values for use by the scheduling and
+                              -- buffer simulation functions.
+                              repCounts = map fromIntegral repInt :: [Int]
+
+                              -- Pair every actor name with its repetition
+                              -- count. This representation is used to compute
+                              -- the required I/O buffer sizes.
                               repsWithNames = zip (map name actors) repCounts
+
+                              -- Obtain the delay buffer mappings for the
+                              -- internal edges. These mappings associate
+                              -- original signals with their delay buffers.
                               delayBuffers = getBuffers edges
+
                            in do
+
+                                acyclicPresedenceGraph <- createAcyclicPresedenceGraph actors edges mat
+
+                                -- Generate a valid actor execution schedule
+                                -- using the actors, edges, and repetition
+                                -- counts. The returned indices identify the
+                                -- actors in the original actors list.
                                 schedIdxs <- greedySchedule actors edges repCounts
+
+                                -- Simulate buffer usage across the generated
+                                -- schedule to determine the required sizes
+                                -- of the internal edge buffers.
+                                -- The initial token count of each edge is
+                                -- supplied as the initial buffer occupancy.
                                 internalBufSizes <- pure $ simulateBufferUsage actors edges (map initTokens edges) schedIdxs
+
+                                -- Convert the actor indices in the schedule
+                                -- into actor names, preserving execution order
+                                -- and repeated occurrences of the same actor.
                                 schedNames <- pure $ map (name . (actors !!)) schedIdxs
+
+                                -- Calculate the required input/output buffer
+                                -- sizes and obtain the corresponding aliases,
+                                -- using the repetition counts of the actors.
                                 (ioBufSizes, aliases) <- computeIOBufferSizes irSystem repsWithNames
+
+                                -- Assemble the final schedule:
+                                --   - schedNames specifies the actor execution order.
+                                --   - ioBufSizes ++ internalBufSizes combines
+                                --     I/O buffer sizes with internal buffer sizes.
+                                --   - delayBuffers ++ aliases combines the
+                                --     internal delay mappings with the I/O aliases.
                                 pure $ Schedule (schedNames, ioBufSizes ++ internalBufSizes, delayBuffers ++ aliases)
                  in finalResult
+
+            -- If the topology matrix rank does not equal the number of actors
+            -- minus one, reject the graph because the required repetition
+            -- vector cannot be computed under this algorithm's rank condition.
             else
               Left "Matrix rank is not equal to number of actors minus one. Cannot compute repetition vector."
 

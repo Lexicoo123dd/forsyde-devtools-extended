@@ -68,6 +68,20 @@ generateDefaultFileName f OutputSchedule = f ++ ".sched"
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
+-- "POC MC run :)"
+run (Arguments (InputFile input_file) output_file OutputC t inputType r pkgPath) = do
+  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
+  let (forsydeIR, lookupSignals) = case translateCoreProgram dflags core of
+        Left e -> error e
+        Right v -> v
+  let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffers forsydeIR of
+        Left e -> error e
+        Right v -> v
+  let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
+  let c = translateProgram proceduralIR t inputType True
+  write_output output_file OutputC c
+
+
 -- "Normal run"
 run (Arguments (InputFile input_file) output_file OutputC t inputType r pkgPath) = do
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
