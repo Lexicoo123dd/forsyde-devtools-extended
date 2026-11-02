@@ -4,14 +4,11 @@ import Data.List (intercalate)
 import GHC
 import GHC.Core
 import GHC.Driver.Ppr
-import GHC.Plugins (Literal, Var, litValue)
+import GHC.Plugins (Var)
 import Text.Printf (printf)
 
 indent :: String -> String
 indent = unlines . map ("  " ++) . lines
-
-literalToInt :: Literal -> Int
-literalToInt literal = fromIntegral $ litValue literal
 
 prettyCoreBind :: DynFlags -> CoreBind -> String
 prettyCoreBind dflags bind = case bind of
