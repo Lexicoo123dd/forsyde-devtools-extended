@@ -26,6 +26,7 @@ data InputFormat
 
 data OutputFormat
   = OutputC
+  | OutputCMC
   | OutputCore
   | OutputForSyDeIR
   | OutputForSyDeIRJSON

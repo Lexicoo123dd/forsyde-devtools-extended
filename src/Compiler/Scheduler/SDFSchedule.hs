@@ -20,6 +20,7 @@ createAcyclicPresedenceGraph actors edges matrix = do
     -- list of actor + instance, eg [(Actor_1, 1), (Actor_1, 2), (Actor_2, 1), ... ]
 
     graph = helperAPG initbuffers q actors edges matrix [] []
+    in graph
   
 
 helperAPG :: [Integer] -> V.Vector Int -> [Actor] -> [Edge] -> [[Integer]] -> [(IRId, Int)] -> [(IRId, IRId)] -> ([(IRId, Int)], [(IRId, IRId)])
