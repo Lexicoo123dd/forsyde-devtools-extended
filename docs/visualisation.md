@@ -4,7 +4,7 @@
 
 The ForSyDe visualisation tool uses KIELER diagram technology to graphically visualise ForSyDe models written in Haskell. The specific approach taken is to implement a language server which uses the KIELER diagram server API to communicate with either the KIELER CLI or the KIELER VS Code extension.
 
-The process used is shown in the diagram below. It involves reusing the beginning parts of the compiler. The frontend is used to obtain the ForSyDe IR. The LSP takes the ForSyDe IR which it uses to construct a graph according to the KLighD JSON schema, which KIELER can visualise. This can be communicated to either KLighD VSCode or KLighD CLI, but at this time only the latter is tested.
+The process used is shown in the diagram below. It involves reusing the beginning parts of the compiler. The frontend is used to obtain the ForSyDe IR. The LSP takes the ForSyDe IR which it uses to construct a graph according to the KLighD JSON schema, which KIELER can visualise. This can be communicated to either KLighD VSCode or KLighD CLI. The current local development path has been verified with the KLighD VS Code extension.
 
 ```mermaid
 flowchart TD
@@ -15,6 +15,19 @@ flowchart TD
  D --> E("klighd-vscode")
  D --> F("klighd-cli")
 ```
+
+### Diagram synthesis module
+
+`src/Visualiser/KLighD.hs` owns the diagram synthesis from ForSyDe IR and an
+optional SDF schedule to the KLighD `GraphElement` representation. This keeps
+node, port, edge, label, rendering, and layout-property decisions in one
+module. `src/LSP.hs` coordinates requests and sends the resulting graph through
+the KLighD protocol.
+
+The module interface is intentionally small: `forSyDeIRToGraph` is the only
+export. Tests exercise this same interface and preserve the element ordering,
+identifier format, buffer labels, delay rendering, and adjacent rate-label
+rules used by source selection and diagram rendering.
 
 ## LSP
 

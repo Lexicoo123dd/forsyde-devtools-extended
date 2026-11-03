@@ -47,10 +47,13 @@ library
     CoreIRToProceduralIR
     ForSyDeIR
     ForSyDeIRToProceduralIR
+    LSPUri
     ProceduralIR
     ProceduralIRToC
     SDFSchedule
+    SKGraphSchema
     Utilities
+    Visualiser.KLighD
 
 library examples
   import: common-options
@@ -92,10 +95,12 @@ executable forsyde-lsp-exe
     CoreIR
     CoreIRToForSyDeIR
     ForSyDeIR
+    LSPUri
     ProceduralIR
     SDFSchedule
     SKGraphSchema
     Utilities
+    Visualiser.KLighD
 
 test-suite forsyde-devtools-test
   import: common-options
@@ -108,9 +113,11 @@ test-suite forsyde-devtools-test
 
   other-modules:
     ForSyDeIRSpec
+    LSPUriSpec
     ProceduralIRSpec
     ProceduralIRToCSpec
     SDFScheduleSpec
+    VisualiserKLighDSpec
 
   build-depends:
     forsyde-devtools,
