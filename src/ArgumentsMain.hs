@@ -26,11 +26,14 @@ data InputFormat
 
 data OutputFormat
   = OutputC
+  | OutputCMC
   | OutputCore
   | OutputForSyDeIR
   | OutputForSyDeIRJSON
   | OutputProceduralIR
   | OutputSchedule
+  | OutputScheduleMC
+  deriving (Show, Eq)
 
 data Target
   = PC
@@ -44,6 +47,12 @@ data Runs
   = Limited Int
   | Perpetual
 
+data SchedulePrint
+  = NoSchedulePrint
+  | SchedulePrintStdOut
+  | SchedulePrintFile FilePath
+  deriving (Show, Eq)
+
 data Arguments = Arguments
   { -- Files
     input :: Input,
@@ -56,7 +65,11 @@ data Arguments = Arguments
     iType :: InputType,
     runs :: Runs,
     -- Path to the package DB containing ForSyDe Shallow
-    forSyDePath :: Maybe FilePath
+    forSyDePath :: Maybe FilePath,
+    -- Multi-core options
+    multicore :: Bool,
+    printSchedule :: SchedulePrint,
+    numCores :: Int
   }
 
 -- Handle file input, always need to define a file
@@ -137,12 +150,24 @@ inputFormatProceduralIR =
 -- need to be active.
 outputFormatTop :: Parser OutputFormat
 outputFormatTop =
-  outputFormatC
+  outputFormatScheduleMC
+    <|> outputFormatCMCPOC
     <|> outputFormatCore
     <|> outputFormatForSyDeIR
     <|> outputFormatForSyDeIRJSON
     <|> outputFormatProceduralIR
     <|> outputFormatSchedule
+    <|> outputFormatC
+
+outputFormatScheduleMC :: Parser OutputFormat
+outputFormatScheduleMC =
+  flag'
+    OutputScheduleMC
+    ( long "output-schedule-mc"
+        <> long "schedule-mc"
+        <> long "output-mc-schedule"
+        <> help "Output the multi-core SDF schedule per core to file instead of code"
+    )
 
 outputFormatC :: Parser OutputFormat
 outputFormatC =
@@ -155,8 +180,7 @@ outputFormatC =
 
 outputFormatCMCPOC :: Parser OutputFormat
 outputFormatCMCPOC =
-  flag
-    OutputCMC
+  flag'
     OutputCMC
     ( long "output-c-mc"
         <> help "Output file in C multi-core"
@@ -273,7 +297,56 @@ forSyDePathOption =
         <> help "The path to the ForSyDe Shallow package (unspecified by default)"
     )
 
--- Top level argument parsing function, takes 4 flags.
+-- Flag signifying that we want multi-core
+multicoreOption :: Parser Bool
+multicoreOption =
+  switch
+    ( short 'm'
+        <> long "multicore"
+        <> long "multi-core"
+        <> long "mc"
+        <> help "Enable multi-core execution"
+    )
+
+-- Optional flag for schedule printing: defaults to stdout if -s or --print-schedule is given. Default when omitted is not to print (NoSchedulePrint).
+schedulePrintOption :: Parser SchedulePrint
+schedulePrintOption =
+  flag' SchedulePrintStdOut
+    ( short 's'
+        <> long "print-schedule"
+        <> long "print-schedule-stdout"
+        <> long "schedule-stdout"
+        <> help "Print the SDF schedule to stdout (default when -s or --print-schedule is specified)"
+    )
+    <|> option
+      ( str >>= \s -> case s of
+          "stdout" -> pure SchedulePrintStdOut
+          "-" -> pure SchedulePrintStdOut
+          f -> pure (SchedulePrintFile f)
+      )
+      ( long "print-schedule"
+          <> long "print-schedule-file"
+          <> long "schedule-file"
+          <> metavar "FILE"
+          <> help "Print schedule to a specified file (e.g. --print-schedule=FILE or --schedule-file FILE)"
+      )
+    <|> pure NoSchedulePrint
+
+-- Optional flag for number of cores: default is 2 cores.
+numCoresOption :: Parser Int
+numCoresOption =
+  option
+    auto
+    ( short 'c'
+        <> long "cores"
+        <> long "num-cores"
+        <> metavar "CORES"
+        <> value 2
+        <> showDefault
+        <> help "Number of cores to use for multi-core scheduling (default: 2)"
+    )
+
+-- Top level argument parsing function
 arguments :: Parser Arguments
 arguments =
   Arguments
@@ -284,3 +357,6 @@ arguments =
     <*> ioTop
     <*> runsTop
     <*> forSyDePathOption
+    <*> multicoreOption
+    <*> schedulePrintOption
+    <*> numCoresOption
