@@ -8,8 +8,17 @@ import Compiler.ForSyDeIRToProceduralIR (translateIRSystemToProgram)
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
 import Compiler.ProceduralIR (prettyProgram)
 import Compiler.ProceduralIRToC (translateProgram)
-import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
 import Options.Applicative
+import Compiler.Scheduler.SDFSchedule
+  ( Schedule (..),
+    computeScheduleAndBuffers,
+    computeScheduleAndBuffersMCPOC,
+    computeScheduleAndBuffersMCPOCWithCores,
+    computeScheduleAndBuffersMCPOCPrint,
+    computeScheduleAndBuffersMCPOCPrintWithCores,
+    computeScheduleAndBuffersPrint,
+  )
+import Utilities (compileToCoreWithForSyDePath)
 
 {-
 
@@ -55,11 +64,13 @@ write_output (OutputFile (output_file, NoFileExtension)) extension s =
 -- Function for generating default file names
 generateDefaultFileName :: FilePath -> OutputFormat -> FilePath
 generateDefaultFileName f OutputC = f ++ ".c"
+generateDefaultFileName f OutputCMC = f ++ ".c"
 generateDefaultFileName f OutputCore = f ++ ".hcr"
 generateDefaultFileName f OutputForSyDeIR = f ++ ".fir"
 generateDefaultFileName f OutputForSyDeIRJSON = f ++ ".json"
 generateDefaultFileName f OutputProceduralIR = f ++ ".pir"
 generateDefaultFileName f OutputSchedule = f ++ ".sched"
+generateDefaultFileName f OutputScheduleMC = f ++ ".sched"
 
 -- Main function for running after arguments have been returned from main.
 -- Pattern matches on the requested output type to determine which stages
@@ -69,37 +80,94 @@ generateDefaultFileName f OutputSchedule = f ++ ".sched"
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
-run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath) = do
+run args = do
+  let InputFile input_file = input args
+      output_file = output args
+      out_fmt = output_format args
+      t = target args
+      inputType = iType args
+      r = runs args
+      pkgPath = forSyDePath args
+      isMC = multicore args || out_fmt == OutputCMC || out_fmt == OutputScheduleMC
+      cores = numCores args
+      schedPrint = printSchedule args
+
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let outputIR = case outputType of
-        OutputCore ->
-          prettyCoreProgram dflags core
-        OutputForSyDeIR -> do
-          let (forsydeIR, _) = translateCoreHelper dflags core
-          prettyIRSystem dflags forsydeIR
-        OutputForSyDeIRJSON -> do
-          let (forsydeIR, _) = translateCoreHelper dflags core
-          prettyIRJSON forsydeIR
-        OutputSchedule -> do
-          let (forsydeIR, _) = translateCoreHelper dflags core
-          computeScheduleAndBuffersPrint forsydeIR
-        OutputProceduralIR -> do
-          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
-          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
-          prettyProgram $ translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
-        OutputC -> do
-          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
-          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
-          let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
-          translateProgram proceduralIR target inputType True
-  write_output output_file outputType outputIR
-  where
-    translateCoreHelper dflags core = case translateCoreProgram dflags core of
-      Left e -> error e
-      Right v -> v
-    computeScheduleHelper forsydeIR = case computeScheduleAndBuffers forsydeIR of
-      Left e -> error e
-      Right (Schedule v) -> v
+  let (forsydeIR, lookupSignals) = case translateCoreProgram dflags core of
+        Left e -> error e
+        Right v -> v
+
+  -- 1. Check if schedule printing was requested via --print-schedule
+  case schedPrint of
+    SchedulePrintStdOut -> do
+      let schedStr =
+            if isMC
+              then computeScheduleAndBuffersMCPOCPrintWithCores cores forsydeIR
+              else computeScheduleAndBuffersPrint forsydeIR
+      putStr schedStr
+    SchedulePrintFile path -> do
+      let schedStr =
+            if isMC
+              then computeScheduleAndBuffersMCPOCPrintWithCores cores forsydeIR
+              else computeScheduleAndBuffersPrint forsydeIR
+      writeFile path schedStr
+    NoSchedulePrint -> pure ()
+
+  -- 2. Execute output according to output format
+  case out_fmt of
+    OutputSchedule ->
+      if isMC
+        then write_output output_file OutputSchedule (computeScheduleAndBuffersMCPOCPrintWithCores cores forsydeIR)
+        else write_output output_file OutputSchedule (computeScheduleAndBuffersPrint forsydeIR)
+
+    OutputScheduleMC ->
+      write_output output_file OutputScheduleMC (computeScheduleAndBuffersMCPOCPrintWithCores cores forsydeIR)
+
+    OutputC ->
+      if isMC
+        then do
+          let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffersMCPOCWithCores cores forsydeIR of
+                Left e -> error e
+                Right v -> v
+          let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
+          let c = translateProgram proceduralIR t inputType True
+          write_output output_file OutputC c
+        else do
+          let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffers forsydeIR of
+                Left e -> error e
+                Right v -> v
+          let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
+          let c = translateProgram proceduralIR t inputType True
+          write_output output_file OutputC c
+
+    OutputCMC -> do
+      let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffersMCPOCWithCores cores forsydeIR of
+            Left e -> error e
+            Right v -> v
+      let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
+      let c = translateProgram proceduralIR t inputType True
+      write_output output_file OutputCMC c
+
+    OutputCore ->
+      write_output output_file OutputCore (prettyCoreProgram dflags core)
+
+    OutputForSyDeIR ->
+      write_output output_file OutputForSyDeIR (prettyIRSystem dflags forsydeIR)
+
+    OutputForSyDeIRJSON ->
+      write_output output_file OutputForSyDeIRJSON (prettyIRJSON forsydeIR)
+
+    OutputProceduralIR -> do
+      let Schedule (schedule, buffers, delayBuffers) =
+            if isMC
+              then case computeScheduleAndBuffersMCPOCWithCores cores forsydeIR of
+                Left e -> error e
+                Right v -> v
+              else case computeScheduleAndBuffers forsydeIR of
+                Left e -> error e
+                Right v -> v
+      let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
+      write_output output_file OutputProceduralIR (prettyProgram proceduralIR)
 
 main :: IO ()
 main = run =<< execParser opts
