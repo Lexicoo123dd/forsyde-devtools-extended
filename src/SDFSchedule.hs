@@ -1,48 +1,41 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 
-module SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint) where
+module SDFSchedule
+  ( Schedule (..),
+    Actor (..),
+    Edge (..),
+    computeScheduleAndBuffers,
+    computeScheduleAndBuffersPrint,
+    computeScheduleAndBuffersMCPOC,
+    computeScheduleAndBuffersMCPoC,
+    computeScheduleAndBuffersMCPOCWithCores,
+    computeScheduleAndBuffersMCPoCWithCores,
+    computeScheduleAndBuffersMCPOCPrint,
+    computeScheduleAndBuffersMCPoCPrint,
+    computeScheduleAndBuffersMCPOCPrintWithCores,
+    computeScheduleAndBuffersMCPoCPrintWithCores,
+  )
+where
 
-import Data.List (elemIndex, find, intercalate, nub)
+import APGSchedule
+  ( Actor (..),
+    Edge (..),
+    ScheduledFiring (..),
+    computeHuLevels,
+    createAcyclicPresedenceGraph,
+    fireOnce,
+    incomingEdgeIndices,
+    listSchedulingHuLevel,
+    outgoingEdgeIndices,
+    toPerCoreSchedule,
+    updateAt,
+  )
+import Data.List (elemIndex, find, intercalate, nub, sortBy)
+import qualified Data.Map.Strict as Map
+import Data.Ord (comparing)
 import Data.Ratio (denominator, numerator)
 import ForSyDeIR
-import GHC.Generics (Generic)
-import qualified Data.Vector as V
-
-createAcyclicPresedenceGraph :: [Actor] -> [Edge] -> [[Integer]] -> ([(IRId, Int)], [(IRId, IRId)] )
-createAcyclicPresedenceGraph actors edges matrix = do 
-  let
-    -- b(0)
-    initBuffers = map initTokens edges
-    -- repetition vector with size of size number of actors
-    q :: V.Vector Int
-    q = V.replicate (length actors) 0
-    -- list of actor + instance, eg [(Actor_1, 1), (Actor_1, 2), (Actor_2, 1), ... ]
-
-    graph = helperAPG initbuffers q actors edges matrix [] []
-  
-
-helperAPG :: [Integer] -> V.Vector Int -> [Actor] -> [Edge] -> [[Integer]] -> [(IRId, Int)] -> [(IRId, IRId)] -> ([(IRId, Int)], [(IRId, IRId)])
-helperAPG currentBuffer q actors edges matrix presActorInstances presEdges = do 
-
-
--- FOR EACH input edge a OF α:
---
---                     η = producer(actor connected by a)
---
---                     d = compute_distance(a, q, b)  # Equation (7)
---                     d = MAX(0, d)
---
---                     # The first d instances of η must precede x
---                     FOR j = 1 TO d:
---                         IF (η, j) EXISTS IN V_G:
---                             ADD EDGE ((η, j), x) TO E_G
-
-
-
--- check if runnable 
-isNodeRunnable :: [Integer] -> [Actor] -> [[Integer]] -> Bool
-
 
 -- | Convert ForSyDe IR to SDF data structures
 convertIRSystem :: IRSystem -> Either String ([Actor], [Edge])
@@ -162,28 +155,6 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
   normalEdges <- sequence $ map makeNormalEdges normalSigs
   finalEdges <- sequence $ map normalizeSelfLoop (normalEdges ++ delayEdges)
   pure (baseActors, finalEdges)
-
-----------------------------------------------------------
--- Data structures definitions
-----------------------------------------------------------
-
-data Actor = Actor
-  { name :: IRId,
-    isInput :: Bool
-  }
-  deriving (Show, Eq, Generic)
-
-data Edge = Edge
-  { edgeName :: IRId,
-    src :: Actor,
-    dst :: Actor,
-    prod :: Int,
-    cons :: Int,
-    isDelay :: Bool,
-    initTokens :: Int, -- Count of Init tokens for delay edges
-    buffers :: Maybe [(IRId, IRId)]
-  }
-  deriving (Show, Eq, Generic)
 
 ----------------------------------------------------------
 -- Topology matrix and null space calculation
@@ -312,64 +283,7 @@ matrixEdgesRowsToString edges actors topoMatrix =
 -- To fire an actor, it must have enough input tokens for all its incoming edges.
 ----------------------------------------------------------
 
--- | Get all the incoming edges for a given actor
--- Parameters:
--- - actors: list of actors
--- - edges: list of edges
--- - actorIndex: index of the actor
--- Returns: all edges satisfying: dst edge == actors[actorIndex]
-incomingEdgeIndices :: [Actor] -> [Edge] -> Int -> [Int]
-incomingEdgeIndices actors edges actorIndex =
-  [idx | (idx, edge) <- zip [0 ..] edges, dst edge == (actors !! actorIndex)]
 
--- | Get all the outgoing edges for a given actor
--- Parameters:
--- The same as incomingEdgeIndices
--- Returns: all edges satisfying: src edge == actors[actorIndex]
-outgoingEdgeIndices :: [Actor] -> [Edge] -> Int -> [Int]
-outgoingEdgeIndices actors edges actorIndex =
-  [idx | (idx, edge) <- zip [0 ..] edges, src edge == (actors !! actorIndex)]
-
--- | Update the element at a given index with a given function
-updateAt :: Int -> (a -> a) -> [a] -> [a]
-updateAt index func list =
-  case splitAt index list of
-    (before, element : after) -> before ++ (func element) : after
-    (_, []) -> error $ "updateAt: index " ++ show index ++ " out of bounds for list of length " ++ show (length list)
-
--- | Simulate one firing of a give actor
---
--- Parameters:
--- - actors: list of actors
--- - edges: list of edges
--- - actorIndex: index of the firing actor
--- - tokens: list of current amount of tokens for each edge
--- - minTokens: list of minimum tokens of each edge
--- Returns: the new tokens and the new minimum tokens
---
--- Steps:
--- 1. Get the incoming and outgoing edges for the firing actor
--- 2. Consume the tokens for the incoming edges with the consumption rate of the edge
--- 3. Produce the tokens for the outgoing edges with the production rate of the edge
--- 4. Update the minimum tokens
---
--- Returns: the new tokens and the new minimum tokens
-fireOnce :: [Actor] -> [Edge] -> Int -> [Int] -> [Int]
-fireOnce actors edges actorIndex tokens =
-  let incomingEdges = incomingEdgeIndices actors edges actorIndex
-      outgoingEdges = outgoingEdgeIndices actors edges actorIndex
-      tokensAfterConsume = foldl consume tokens incomingEdges
-      tokensAfterProduce = foldl produce tokensAfterConsume outgoingEdges
-   in tokensAfterProduce
-  where
-    consume :: [Int] -> Int -> [Int]
-    consume currentTokens edgeIndex =
-      let consumption = cons (edges !! edgeIndex)
-       in updateAt edgeIndex (subtract consumption) currentTokens
-    produce :: [Int] -> Int -> [Int]
-    produce currentTokens edgeIndex =
-      let production = prod (edges !! edgeIndex)
-       in updateAt edgeIndex (+ production) currentTokens
 
 -- | Greedy forced schedule algorithm
 --
@@ -727,8 +641,6 @@ computeScheduleAndBuffers irSystem = do
 
                            in do
 
-                                acyclicPresedenceGraph <- createAcyclicPresedenceGraph actors edges mat
-
                                 -- Generate a valid actor execution schedule
                                 -- using the actors, edges, and repetition
                                 -- counts. The returned indices identify the
@@ -915,3 +827,170 @@ nullspaceVectorToString = unlines . map formatRational
     formatRational x
       | denominator x == 1 = show (numerator x)
       | otherwise = show (numerator x) ++ "/" ++ show (denominator x)
+
+
+
+computeScheduleAndBuffersMCPoC :: IRSystem -> Either String Schedule
+computeScheduleAndBuffersMCPoC = computeScheduleAndBuffersMCPoCWithCores 2
+
+computeScheduleAndBuffersMCPOC :: IRSystem -> Either String Schedule
+computeScheduleAndBuffersMCPOC = computeScheduleAndBuffersMCPoC
+
+computeScheduleAndBuffersMCPOCWithCores :: Int -> IRSystem -> Either String Schedule
+computeScheduleAndBuffersMCPOCWithCores = computeScheduleAndBuffersMCPoCWithCores
+
+computeScheduleAndBuffersMCPoCWithCores :: Int -> IRSystem -> Either String Schedule
+computeScheduleAndBuffersMCPoCWithCores numCores irSystem = do
+  (actors, edges) <- convertIRSystem irSystem
+
+  if null edges
+    then
+      let schedNames = map name actors
+
+          repsWithNames = zip (map name actors) (replicate (length actors) 1)
+
+          internalBufSizes = zip (map edgeName edges) (replicate (length edges) 0)
+       in do
+            (ioBufSizes, aliases) <- computeIOBufferSizes irSystem repsWithNames
+
+            pure $ Schedule (schedNames, ioBufSizes ++ internalBufSizes, aliases)
+
+    else
+      let mat = buildTopologyMatrixEdgesRows actors edges
+
+          rankMat = matrixRank mat
+       in
+        if rankMat == length actors - 1
+            then
+              case nullspaceBasis mat of
+
+              [] -> Left "No repetition vector found: null space is empty."
+
+              (basisVec : _) ->
+                let
+                    repInt = toMinimalIntegers basisVec
+
+                    isZeroVector = all (== 0) (multiplyMatrixVector mat repInt)
+
+                    finalResult
+                      | not isZeroVector = Left "Verification failed: repetition vector is not in null space"
+
+                      | any (<= 0) repInt = Left "Cannot compute a strictly positive repetition vector for this graph."
+
+                      | otherwise =
+                          let
+                              repCounts = map fromIntegral repInt :: [Int]
+
+                              repsWithNames = zip (map name actors) repCounts
+
+                              delayBuffers = getBuffers edges
+
+                           in do
+                                (instances, presEdges) <- createAcyclicPresedenceGraph actors edges mat repCounts
+                                scheduledFirings <- listSchedulingHuLevel numCores instances presEdges (\_ -> 1)
+
+                                let orderedFirings = sortBy (comparing sfStartTime) scheduledFirings
+                                    schedNames = map (fst . sfInstance) orderedFirings
+                                    actorNameList = map name actors
+                                    lookupIdx aName = case elemIndex aName actorNameList of
+                                      Just idx -> idx
+                                      Nothing -> error $ "Actor not found in actor list: " ++ show aName
+                                    schedIdxs = map lookupIdx schedNames
+
+                                internalBufSizes <- pure $ simulateBufferUsage actors edges (map initTokens edges) schedIdxs
+
+                                (ioBufSizes, aliases) <- computeIOBufferSizes irSystem repsWithNames
+                                pure $ Schedule (schedNames, ioBufSizes ++ internalBufSizes, delayBuffers ++ aliases)
+                 in finalResult
+            else
+              Left "Matrix rank is not equal to number of actors minus one. Cannot compute repetition vector."
+
+-- | Formatted string output of the multi-core schedule per core.
+computeScheduleAndBuffersMCPOCPrint :: IRSystem -> String
+computeScheduleAndBuffersMCPOCPrint = computeScheduleAndBuffersMCPOCPrintWithCores 2
+
+computeScheduleAndBuffersMCPoCPrint :: IRSystem -> String
+computeScheduleAndBuffersMCPoCPrint = computeScheduleAndBuffersMCPOCPrint
+
+computeScheduleAndBuffersMCPoCPrintWithCores :: Int -> IRSystem -> String
+computeScheduleAndBuffersMCPoCPrintWithCores = computeScheduleAndBuffersMCPOCPrintWithCores
+
+computeScheduleAndBuffersMCPOCPrintWithCores :: Int -> IRSystem -> String
+computeScheduleAndBuffersMCPOCPrintWithCores numCores irSystem =
+  case convertIRSystem irSystem of
+    Left e -> error e
+    Right (actors, edges) ->
+      if null edges
+        then "No internal edges found. All actors fire once.\n"
+        else
+          let mat = buildTopologyMatrixEdgesRows actors edges
+              matrixStr = matrixEdgesRowsToString edges actors mat
+              rankMat = matrixRank mat
+           in if rankMat /= length actors - 1
+                then "Matrix rank is not equal to number of actors minus one. Cannot compute repetition vector.\n"
+                else case nullspaceBasis mat of
+                  [] -> error "No repetition vector found: null space is empty."
+                  (basisVec : _) ->
+                    let repInt = toMinimalIntegers basisVec
+                        repCounts = map fromIntegral repInt :: [Int]
+                        repsWithNames = zip (map name actors) repCounts
+                     in case createAcyclicPresedenceGraph actors edges mat repCounts of
+                          Left err -> "Error constructing APG: " ++ err ++ "\n"
+                          Right (instances, presEdges) ->
+                            let huLevels = computeHuLevels instances presEdges (\_ -> 1)
+                             in case listSchedulingHuLevel numCores instances presEdges (\_ -> 1) of
+                                  Left err -> "Error in list scheduling: " ++ err ++ "\n"
+                                  Right scheduledFirings ->
+                                    let perCore = toPerCoreSchedule numCores scheduledFirings
+                                        makespan = if null scheduledFirings then 0 else maximum (map sfEndTime scheduledFirings)
+                                        seqSteps = length instances
+                                        speedup = if makespan > 0 then fromIntegral seqSteps / fromIntegral makespan :: Double else 1.0
+
+                                        -- Theoretical lower bound on makespan: max(L, ceil(W / P))
+                                        criticalPath = if null huLevels then 0 else maximum (Map.elems huLevels)
+                                        ceilWoverP = (seqSteps + numCores - 1) `div` numCores
+                                        minPossibleMakespan = max criticalPath ceilWoverP
+                                        theoreticalMaxSpeedup =
+                                          if minPossibleMakespan > 0
+                                            then fromIntegral seqSteps / fromIntegral minPossibleMakespan :: Double
+                                            else 1.0
+
+                                        formatCore (c, firings) =
+                                          let coreFirings = filter (\sf -> sfCore sf == c) (sortBy (comparing sfStartTime) scheduledFirings)
+                                              linesList = map (\sf -> "  [Tick " ++ show (sfStartTime sf) ++ " -> " ++ show (sfEndTime sf) ++ "]: " ++ show (fst (sfInstance sf)) ++ " (instance #" ++ show (snd (sfInstance sf)) ++ ")") coreFirings
+                                              summary = intercalate ", " (map (\inst -> show (fst inst) ++ "^" ++ show (snd inst)) firings)
+                                           in "Core " ++ show c ++ ":\n"
+                                                ++ unlines linesList
+                                                ++ "  Sequence: [" ++ summary ++ "]\n"
+
+                                        perCoreStr = unlines (map formatCore (Map.toList perCore))
+                                        repVecStr = intercalate "\n" [ "  " ++ show label ++ " = " ++ show r | (label, r) <- repsWithNames ]
+                                        huLevelStr = unlines [ "  " ++ show (fst inst) ++ "^" ++ show (snd inst) ++ " : Hu-Level " ++ show lvl | (inst, lvl) <- Map.toList huLevels ]
+                                     in "============================================================\n"
+                                          ++ "           Multi-Core Periodic SDF Schedule (Hu-Level)      \n"
+                                          ++ "============================================================\n\n"
+                                          ++ "Target Cores: " ++ show numCores ++ "\n\n"
+                                          ++ matrixStr ++ "\n\n"
+                                          ++ "Repetition Vector (Firings per period):\n"
+                                          ++ repVecStr ++ "\n\n"
+                                          ++ "Acyclic Precedence Graph (APG):\n"
+                                          ++ "  Total firings (vertices)      : " ++ show (length instances) ++ "\n"
+                                          ++ "  Precedence constraints (edges): " ++ show (length presEdges) ++ "\n\n"
+                                          ++ "Hu-Levels (Critical path distance to sink):\n"
+                                          ++ huLevelStr ++ "\n"
+                                          ++ "------------------------------------------------------------\n"
+                                          ++ "Schedule per Core:\n"
+                                          ++ "------------------------------------------------------------\n"
+                                          ++ perCoreStr ++ "\n"
+                                          ++ "------------------------------------------------------------\n"
+                                          ++ "Schedule Metrics:\n"
+                                          ++ "------------------------------------------------------------\n"
+                                          ++ "  Total Work (W)         : " ++ show seqSteps ++ " firings\n"
+                                          ++ "  Critical Path (L)      : " ++ show criticalPath ++ " ticks\n"
+                                          ++ "  Min Theoretical Makespan: " ++ show minPossibleMakespan ++ " ticks (max(L, ceil(W/P)) = max(" ++ show criticalPath ++ ", " ++ show ceilWoverP ++ "))\n"
+                                          ++ "  Actual Makespan        : " ++ show makespan ++ " cycles / ticks\n"
+                                          ++ "  Actual Speedup         : " ++ show (fromIntegral (round (speedup * 100) :: Int) / 100.0) ++ "x\n"
+                                          ++ "  Theoretical Max Speedup: " ++ show (fromIntegral (round (theoreticalMaxSpeedup * 100) :: Int) / 100.0) ++ "x (for " ++ show numCores ++ " cores)\n"
+
+
+
