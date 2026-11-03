@@ -57,6 +57,9 @@ instance Eq IRId where
   (==) (IRString a) b = a == show b
   (==) a (IRString b) = show a == b
 
+instance Ord IRId where
+  compare a b = compare (show a) (show b)
+
 prettyIRId :: IRId -> String
 prettyIRId = show . show
 

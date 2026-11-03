@@ -35,12 +35,13 @@ common common-options
     prettyprinter == 1.7.2,
     process == 1.6.26.1,
     syb == 0.7.2.4,
-    text == 2.1.3
-    
+    text == 2.1.3,
+    vector
 library
   import: common-options
   hs-source-dirs: src
   exposed-modules:
+    APGSchedule
     ArgumentsMain
     CoreIR
     CoreIRToForSyDeIR
@@ -67,6 +68,7 @@ executable forsyde-compiler-exe
 
   build-depends: forsyde-devtools
   other-modules:
+    APGSchedule
     ArgumentsMain
     CoreIR
     CoreIRToForSyDeIR
@@ -88,6 +90,7 @@ executable forsyde-lsp-exe
 
   build-depends: forsyde-devtools
   other-modules:
+    APGSchedule
     ArgumentsLSP
     CoreIR
     CoreIRToForSyDeIR
