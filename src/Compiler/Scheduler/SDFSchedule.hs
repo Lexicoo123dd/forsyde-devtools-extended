@@ -1,11 +1,11 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 
-module SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint) where
+module Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint) where
 
+import Compiler.ForSyDeIR
 import Data.List (elemIndex, find, intercalate, nub)
 import Data.Ratio (denominator, numerator)
-import ForSyDeIR
 import GHC.Generics (Generic)
 
 -- | Convert ForSyDe IR to SDF data structures

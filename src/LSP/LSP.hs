@@ -7,9 +7,10 @@
 
 module Main (main) where
 
-import ArgumentsLSP
 import Colog.Core ((<&))
 import qualified Colog.Core as L
+import Compiler.ForSyDeIR (IRSystem)
+import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import Control.Concurrent (forkFinally)
 import qualified Control.Exception as E
 import Control.Monad (forever, void)
@@ -26,19 +27,18 @@ import Data.Maybe
 import Data.Proxy
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import ForSyDeIR (IRSystem)
 import qualified Language.LSP.Logging as LSP
 import qualified Language.LSP.Protocol.Message as LSP
 import qualified Language.LSP.Protocol.Types as LSP
 import qualified Language.LSP.Server as LSP
-import LSPUri (filePathToUriText, uriTextToFilePath)
+import LSP.API as API
+import LSP.Arguments
+import LSP.Uri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
-import SDFSchedule (Schedule (..))
 import System.IO
 import Visualiser.KLighD (forSyDeIRToGraph)
-import API
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))

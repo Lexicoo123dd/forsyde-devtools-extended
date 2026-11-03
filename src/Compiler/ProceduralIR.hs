@@ -1,4 +1,4 @@
-module ProceduralIR
+module Compiler.ProceduralIR
   ( UnaryOperator (..),
     BinaryOperator (..),
     Type (..),

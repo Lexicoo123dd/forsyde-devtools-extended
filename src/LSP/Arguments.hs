@@ -1,4 +1,4 @@
-module ArgumentsLSP where
+module LSP.Arguments where
 
 import Options.Applicative
 

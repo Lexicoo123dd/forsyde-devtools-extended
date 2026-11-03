@@ -3,7 +3,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
-module SKGraphSchema where
+module Visualiser.SKGraphSchema where
 
 import Data.Aeson ((.=))
 import qualified Data.Aeson as A

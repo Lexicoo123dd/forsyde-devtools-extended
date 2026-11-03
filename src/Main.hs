@@ -1,15 +1,15 @@
 module Main where
 
 import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments)
-import CoreIR (prettyCoreProgram)
-import CoreIRToForSyDeIR (translateCoreProgram)
-import ForSyDeIR (prettyIRJSON, prettyIRSystem)
-import ForSyDeIRToProceduralIR (translateIRSystemToProgram)
+import Compiler.CoreIR (prettyCoreProgram)
+import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
+import Compiler.ForSyDeIR (prettyIRJSON, prettyIRSystem)
+import Compiler.ForSyDeIRToProceduralIR (translateIRSystemToProgram)
+import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
+import Compiler.ProceduralIR (prettyProgram)
+import Compiler.ProceduralIRToC (translateProgram)
+import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
 import Options.Applicative
-import ProceduralIR (prettyProgram)
-import ProceduralIRToC (translateProgram)
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
-import GHCCoreAPI (compileToCoreWithForSyDePath)
 
 {-
 
