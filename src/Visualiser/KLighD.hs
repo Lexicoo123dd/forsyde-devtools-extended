@@ -10,12 +10,12 @@
 -- rendered or laid out.
 module Visualiser.KLighD (forSyDeIRToGraph) where
 
+import Compiler.ForSyDeIR
+import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import Data.Function ((&))
 import qualified Data.Text as T
-import ForSyDeIR
-import LSPUri (filePathToUriText)
-import SDFSchedule (Schedule (..))
-import SKGraphSchema
+import LSP.Uri (filePathToUriText)
+import Visualiser.SKGraphSchema
 
 -- | Convert a ForSyDe IR system into the graph representation understood by
 -- KLighD. When schedule information is available, signal labels show computed

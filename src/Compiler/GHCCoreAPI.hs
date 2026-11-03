@@ -1,4 +1,4 @@
-module GHCCoreAPI (compileToCoreWithForSyDePath) where
+module Compiler.GHCCoreAPI (compileToCoreWithForSyDePath) where
 
 import Data.Data (Data, gmapT)
 import Data.Generics (extT)

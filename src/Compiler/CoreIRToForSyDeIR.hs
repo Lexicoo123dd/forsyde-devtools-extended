@@ -1,8 +1,8 @@
-module CoreIRToForSyDeIR (translateCoreProgram) where
+module Compiler.CoreIRToForSyDeIR (translateCoreProgram) where
 
-import CoreIR
+import Compiler.CoreIR
+import Compiler.ForSyDeIR
 import Data.List (elemIndex)
-import ForSyDeIR
 import GHC hiding (targetId)
 import GHC.Core
 import GHC.Plugins

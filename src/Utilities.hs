@@ -10,9 +10,9 @@ module Utilities
   )
 where
 
-import CoreIRToForSyDeIR (translateCoreProgram)
-import SDFSchedule (Schedule, computeScheduleAndBuffers)
-import GHCCoreAPI (compileToCoreWithForSyDePath)
+import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
+import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
+import Compiler.Scheduler.SDFSchedule (Schedule, computeScheduleAndBuffers)
 
 newtype Stack a = Stack [a] deriving (Show, Eq)
 

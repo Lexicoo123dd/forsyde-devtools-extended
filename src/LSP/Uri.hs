@@ -1,4 +1,4 @@
-module LSPUri (filePathToUriText, uriTextToFilePath) where
+module LSP.Uri (filePathToUriText, uriTextToFilePath) where
 
 import qualified Data.Text as T
 import qualified Language.LSP.Protocol.Types as LSP

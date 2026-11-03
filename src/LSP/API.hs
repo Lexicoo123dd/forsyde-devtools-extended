@@ -1,6 +1,6 @@
 {-# LANGUAGE LambdaCase #-}
 
-module API
+module LSP.API
   ( Config(..),
     defaultConfig,
     CompileOptions(..),
@@ -11,14 +11,13 @@ module API
   )
 where
 
+import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
+import Compiler.ForSyDeIR
+import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
+import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers)
 import qualified Control.Exception as E
-import qualified Data.Text as T
 import Data.Maybe (mapMaybe)
-import ForSyDeIR
-import GHCCoreAPI (compileToCoreWithForSyDePath)
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
-import CoreIRToForSyDeIR (translateCoreProgram)
-
+import qualified Data.Text as T
 
 data Config = Config
   { file :: Maybe FilePath,

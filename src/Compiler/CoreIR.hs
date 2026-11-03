@@ -1,4 +1,4 @@
-module CoreIR where
+module Compiler.CoreIR where
 
 import Data.List (intercalate)
 import GHC

@@ -2,7 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module ForSyDeIR
+module Compiler.ForSyDeIR
   ( ActorType (..),
     IRConstructor (..),
     IRSignal (..),
@@ -19,7 +19,7 @@ module ForSyDeIR
   )
 where
 
-import CoreIR (prettyCoreExpr)
+import Compiler.CoreIR (prettyCoreExpr)
 import Data.Aeson
 import Data.Aeson.Encode.Pretty
 import Data.Function
