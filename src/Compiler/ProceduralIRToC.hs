@@ -1,8 +1,8 @@
-module ProceduralIRToC where
+module Compiler.ProceduralIRToC where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Target (PC, PICO2))
+import Compiler.ProceduralIR
 import Data.List (intercalate)
-import ProceduralIR
 import Text.Printf (printf)
 
 indent :: String -> String

@@ -7,14 +7,14 @@
 
 module Main (main) where
 
-import ArgumentsLSP
 import Colog.Core ((<&))
 import qualified Colog.Core as L
+import Compiler.ForSyDeIR (IRSystem)
+import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import Control.Concurrent (forkFinally)
 import qualified Control.Exception as E
 import Control.Monad (forever, void)
 import Control.Monad.IO.Class
-import CoreIRToForSyDeIR (translateCoreProgram)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Encode.Pretty as AP
@@ -27,18 +27,18 @@ import Data.Maybe
 import Data.Proxy
 import qualified Data.Sequence as Seq
 import qualified Data.Text as T
-import ForSyDeIR
 import qualified Language.LSP.Logging as LSP
 import qualified Language.LSP.Protocol.Message as LSP
 import qualified Language.LSP.Protocol.Types as LSP
 import qualified Language.LSP.Server as LSP
+import LSP.API as API
+import LSP.Arguments
+import LSP.Uri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
-import SKGraphSchema
 import System.IO
-import Utilities (compileToCoreWithForSyDePath)
+import Visualiser.KLighD (forSyDeIRToGraph)
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
@@ -48,143 +48,6 @@ diagramOpenInTextEditor = (LSP.SMethod_CustomMethod (Proxy @"diagram/openInTextE
 
 setPreferencesMethod :: LSP.SMethod (LSP.Method_CustomMethod "keith/preferences/setPreferences")
 setPreferencesMethod = (LSP.SMethod_CustomMethod (Proxy @"keith/preferences/setPreferences"))
-
--- | Convert ForSyDe IR into the graph representation understood by KLighD
-forSyDeIRToGraph :: FilePath -> IRSystem -> Maybe Schedule -> GraphElement
-forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = graph
-  where
-    -- \| Create a port with a label for signal rate
-    createPort parent rends props (n, _) =
-      KPort
-        { children = [],
-          renderings = rends,
-          properties = props,
-          gid = pid
-        }
-      where
-        pid = parent <> "$P$" <> T.show n
-    -- \| Create a node based on an IRActor
-    createNode = \case
-      (IRActor name _ _ _) ->
-        createNode'
-          name
-          (Just $ T.show name)
-          [KRoundedRectangle [KBackgroundColor 160 160 240] 4 4]
-          [ (NodeLabelsPlacement [1, 4, 6]),
-            (NodeSizeConstraints [0, 1, 2, 3]),
-            (NodeSizeMinimum [64, 64]),
-            (PortConstraints 2)
-          ]
-      (IRDelay name tokens _) ->
-        createNode'
-          name
-          (Just $ T.show $ length tokens)
-          [KEllipse [KBackgroundColor 0 0 0]]
-          [ (NodeLabelsPlacement [1, 3, 7]),
-            (NodeSizeConstraints [3]),
-            (NodeSizeMinimum [12, 12]),
-            (PortConstraints 2)
-          ]
-    -- \| Find all signals which the process is the source of
-    findOutputSignals sigs proc =
-      foldr f [] sigs
-      where
-        f s acc =
-          let IRSignal n (p, rate) _ = s
-           in if p == proc then (n, rate) : acc else acc
-    -- \| Find all signals which the process is the target of
-    findInputSignals sigs proc =
-      foldr f [] sigs
-      where
-        f s acc =
-          let IRSignal n _ (p, rate) = s
-           in if p == proc then (n, rate) : acc else acc
-    -- \| Helper to create signal label, including buffersize if schedule is known
-    signalLabel parent n = buflabel
-      where
-        sigid = parent <> "$L$" <> T.show n
-        siglabel = [KLabel {gid = sigid, label = T.show n, properties = [(NodeLabelsPlacement [1, 5, 7])]}]
-        buflabel = case sched of
-          Just (Schedule (_, buffers, _)) ->
-            case lookup n buffers of
-              Just size -> [KLabel {gid = sigid, label = "|" <> T.show n <> "| = " <> T.show size, properties = [(NodeLabelsPlacement [1, 5, 7])]}]
-              Nothing -> []
-          Nothing -> siglabel
-    -- \| Helper for createNode and global inputs / outputs
-    createNode' name l r p = node
-      where
-        nid = "$root$N$" <> T.show name
-        insignals = findInputSignals signals name
-        outsignals = findOutputSignals signals name
-        inportlabel = if delayId name actors then [] else [KText "▶" []]
-        inports = map (createPort nid inportlabel [PortSide 4]) insignals
-        outports = map (createPort nid [] [PortSide 2]) outsignals
-        siglabel =
-          if delayId name actors
-            then map (\(sigid, _) -> signalLabel nid sigid) insignals & mconcat
-            else []
-        nl = maybe [] (\lc -> [KLabel {gid = nid <> "$L$" <> T.show name, label = lc, properties = []}]) l
-        c = inports <> outports <> siglabel <> nl
-        node =
-          KNode
-            { gid = nid,
-              children = c,
-              renderings = r,
-              properties = p
-            }
-    -- \| Helper to check if an id belongs to a delay
-    delayId did =
-      any
-        ( \case
-            IRDelay aid _ _
-              | aid == did -> True
-              | otherwise -> False
-            _ -> False
-        )
-    -- \| Create an edge from an IRSignal, depends on port id
-    createEdge (IRSignal n (sname, srate) (tname, trate)) = edge
-      where
-        sn = "$root$N$" <> T.show sname <> "$P$" <> T.show n
-        tn = "$root$N$" <> T.show tname <> "$P$" <> T.show n
-        name = sn <> "$E$" <> T.show n
-        sigid = name <> "$L$" <> T.show n
-        tl = [KLabel {gid = sigid <> "$" <> T.show tname, label = T.show trate, properties = [EdgeLabelsPlacement 1]}]
-        sl = [KLabel {gid = sigid <> "$" <> T.show sname, label = T.show srate, properties = [EdgeLabelsPlacement 2]}]
-        (srclabel, tgtlabel, buflabel) = case (delayId sname actors, delayId tname actors) of
-          (True, True) -> ([], [], [])
-          (True, False) -> ([], tl, [])
-          (False, True) -> (sl, [], [])
-          (False, False) -> (sl, tl, signalLabel name n)
-        c = case n of
-          _ | n == sname -> tgtlabel
-          _ | n == tname -> srclabel
-          _ | otherwise -> buflabel <> srclabel <> tgtlabel
-        edge =
-          KEdge
-            { gid = name,
-              children = c,
-              renderings = [KRoundedBendsPolyline [] 4],
-              properties = [],
-              source = sn,
-              target = tn
-            }
-    nodes =
-      map createNode actors
-        <> map (\n -> createNode' n (Just $ T.show n) [] [LayerConstraint 2]) inputs
-        <> map (\n -> createNode' n (Just $ T.show n) [] [LayerConstraint 4]) outputs
-    edges = map createEdge signals
-    graph =
-      KGraph
-        { gid = T.pack ("file://" ++ filename),
-          child =
-            KNode
-              { gid = "$root",
-                children = nodes ++ edges,
-                properties = [],
-                renderings = []
-              },
-          properties = []
-        }
 
 -- | Send our supported syntheses to the LSP client (KLighD-VSCode)
 setSynthesis :: T.Text -> A.Value
@@ -215,7 +78,7 @@ updateOptions f _clientId =
             "valuedSynthesisOptions" .= (Seq.empty :: Seq.Seq A.Object),
             "layoutOptions" .= (Seq.empty :: Seq.Seq A.Object),
             "actions" .= (Seq.empty :: Seq.Seq A.Object),
-            "modelUri" .= T.pack ("file://" ++ f)
+            "modelUri" .= filePathToUriText f
           ]
     ]
 
@@ -237,7 +100,7 @@ diagramOpenInTextEditorMessage uri sline scol eline ecol =
   A.object
     [ "location"
         .= A.object
-          [ "uri" .= ("file://" <> uri),
+          [ "uri" .= filePathToUriText uri,
             "range"
               .= A.object
                 [ "start"
@@ -255,27 +118,25 @@ diagramOpenInTextEditorMessage uri sline scol eline ecol =
       "forceOpen" .= False
     ]
 
-data Config = Config
-  { file :: Maybe FilePath,
-    clientId :: Maybe T.Text,
-    system :: Maybe IRSystem,
-    schedule :: Maybe Schedule,
-    forSyDePkg :: Maybe FilePath
-  }
-  deriving (Show)
+recomputeModel :: LSP.LspT API.Config IO ()
+recomputeModel = do
+  config <- LSP.getConfig
+  case file config of
+    Nothing -> pure ()
+    Just sourceFile -> do
+      let options = API.CompileOptions { forSyDePath = forSyDePkg config }
+      result <- liftIO $ API.compileFile options sourceFile
+      case result of
+        Left err -> do
+          dualLogger <& ("Compilation failed: " <> T.show err) `L.WithSeverity` L.Error
+        Right compiled -> do
+          LSP.setConfig config
+            { system = Just (resultIR compiled),
+              schedule = Just (resultSchedule compiled) }
 
-defaultConfig :: Config
-defaultConfig =
-  Config
-    { file = Nothing,
-      clientId = Nothing,
-      system = Nothing,
-      schedule = Nothing,
-      forSyDePkg = Nothing
-    }
 
 -- | The static notification and request handlers we support
-handlers :: LSP.Handlers (LSP.LspM Config)
+handlers :: LSP.Handlers (LSP.LspM API.Config)
 handlers =
   mconcat
     [ LSP.notificationHandler LSP.SMethod_Initialized $ \_not -> pure (),
@@ -354,7 +215,7 @@ handlers =
         -- Get location information on selected object
         config <- LSP.getConfig
         let sel = getSelected p & map (T.split (\_c -> _c == '$')) & map last & map T.unpack
-        let spans = getSelectedSpans sel config
+        let spans = API.getSelectedSpans sel config
         if length spans > 0
           then liftIO $ stderrLogger <& ("Selected: " <> T.show spans) `L.WithSeverity` L.Debug
           else pure ()
@@ -371,66 +232,15 @@ handlers =
         pure ()
     ]
   where
-    getSelectedSpans sel Config {system = ir} = case ir of
-      Nothing -> []
-      Just (IRSystem _ procs sigs _) ->
-        let s = findSignalSpan . IRString <$> sel <*> [sigs] & mconcat
-            a = findProcessSpan . IRString <$> sel <*> [procs] & mconcat
-         in s <> a
-    sendModel :: LSP.LspT Config IO ()
+    sendModel :: LSP.LspT API.Config IO ()
     sendModel = do
-      config@Config {file = f, clientId = c, system = s, schedule = curSched} <- LSP.getConfig
+      config@API.Config {file = f, clientId = c, system = s, schedule = curSched} <- LSP.getConfig
       case (f, c, s) of
         (Just curFile, Just curId, Just curSystem) ->
           LSP.sendNotification diagramAcceptMethod (setSynthesis curId)
             >> LSP.sendNotification diagramAcceptMethod (updateOptions curFile curId)
             >> LSP.sendNotification diagramAcceptMethod (requestBounds curFile curId curSystem curSched)
         _ -> dualLogger <& ("does not have enough information to send diagram: " <> T.show config) `L.WithSeverity` L.Error
-    recomputeModel :: LSP.LspT Config IO ()
-    recomputeModel = do
-      config <- LSP.getConfig
-      out <- case config of
-        Config {file = Just newfile} ->
-          compileToModelMaybe newfile
-        _ -> pure Nothing
-      case out of
-        Nothing -> pure ()
-        Just ir -> do
-          LSP.setConfig config {system = out}
-          sched <- computeScheduleMaybe ir
-          LSP.setConfig config {system = out, schedule = sched}
-          pure ()
-    compileToModelMaybe f = do
-      config <- LSP.getConfig
-      dualLogger <& ("Compiling: " <> T.show f) `L.WithSeverity` L.Debug
-      result <- liftIO $ E.try $ compileToCoreWithForSyDePath (forSyDePkg config) f
-      case result of
-        Left e -> do
-          dualLogger <& ("Failed to compile into core: " <> T.show (e :: E.SomeException)) `L.WithSeverity` L.Error
-          pure $ system config
-        Right (core, dflags) -> do
-          let s = translateCoreProgram dflags core
-          case s of
-            Left e -> do
-              dualLogger <& ("Failed to compile into ForSyDe IR: " <> T.pack e) `L.WithSeverity` L.Error
-              pure $ system config
-            Right (ir, _) -> pure $ Just ir
-    computeScheduleMaybe ir =
-      case computeScheduleAndBuffers ir of
-        Left e -> do
-          dualLogger <& ("Failed to compute schedule: " <> T.pack e) `L.WithSeverity` L.Error
-          pure Nothing
-        Right sched -> pure . Just $ sched
-    findSignalSpan :: IRId -> [IRSignal] -> [IRSpan]
-    findSignalSpan sig l = mapMaybe match l
-      where
-        match (IRSignal n _ _) = if sig == n then varToSpan n else Nothing
-    findProcessSpan :: IRId -> [IRConstructor] -> [IRSpan]
-    findProcessSpan proc l = mapMaybe match l
-      where
-        match = \case
-          IRDelay n _ _ -> if proc == n then varToSpan n else Nothing
-          IRActor n _ _ _ -> if proc == n then varToSpan n else Nothing
     getKey key = \case
       A.Object o -> o !? key
       _ -> Nothing
@@ -468,7 +278,7 @@ handlers =
         >>= getKey "options"
         >>= getKey "sourceUri"
         >>= \case
-          A.String _a -> Just $ T.unpack $ snd $ T.splitAt 7 _a
+          A.String uri -> uriTextToFilePath uri
           _ -> Nothing
     getClientId params =
       Just params
@@ -487,13 +297,13 @@ formatOut (L.WithSeverity m s) =
 stderrLogger :: L.LogAction IO (L.WithSeverity T.Text)
 stderrLogger = L.cmap formatOut L.logStringStderr
 
-clientLogger :: L.LogAction (LSP.LspM Config) (L.WithSeverity T.Text)
+clientLogger :: L.LogAction (LSP.LspM API.Config) (L.WithSeverity T.Text)
 clientLogger = LSP.defaultClientLogger
 
-dualLogger :: L.LogAction (LSP.LspM Config) (L.WithSeverity T.Text)
+dualLogger :: L.LogAction (LSP.LspM API.Config) (L.WithSeverity T.Text)
 dualLogger = clientLogger <> L.hoistLogAction liftIO stderrLogger
 
-runServerC :: Handle -> Handle -> LSP.ServerDefinition Config -> IO Int
+runServerC :: Handle -> Handle -> LSP.ServerDefinition API.Config -> IO Int
 runServerC =
   LSP.runServerWithHandles
     (L.cmap (fmap logToText) stderrLogger)
@@ -524,21 +334,19 @@ run (Arguments comm (Host ip) (TCP p) i_f pkgPath) =
     (FromClient, CommStdio) ->
       void $ runServerC stdin stdout serverDef
     (InputFile f, _) -> do
-      (core, dflags) <- liftIO $ compileToCoreWithForSyDePath pkgPath f
-      let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
-            Left e -> error e
-            Right v -> v
-      let sched = case computeScheduleAndBuffers forsydeIR of
-            Left e -> error e
-            Right v -> v
-      let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
-      BSL8.putStrLn $ AP.encodePretty graphMessage
+      let options = API.CompileOptions { forSyDePath = pkgPath }
+      result <- liftIO $ API.compileFile options f
+      case result of
+        Left err -> error (show err)
+        Right CompileResult{resultIR = forsydeIR, resultSchedule = sched} -> do
+          let graphMessage = requestBounds f "sprotty" forsydeIR (Just sched)
+          BSL8.putStrLn $ AP.encodePretty graphMessage
   where
     serverDef =
       LSP.ServerDefinition
-        { parseConfig = const $ const $ Right defaultConfig {forSyDePkg = pkgPath},
+        { parseConfig = const $ const $ Right API.defaultConfig {forSyDePkg = pkgPath},
           onConfigChange = const $ pure (),
-          defaultConfig = defaultConfig {forSyDePkg = pkgPath},
+          defaultConfig = API.defaultConfig {forSyDePkg = pkgPath},
           configSection = "demo",
           doInitialize = \env _req -> pure $ Right env,
           staticHandlers = \_caps -> handlers,
@@ -564,7 +372,7 @@ runTCPServer host port server = withSocketsDo $ do
       withFdSocket sock setCloseOnExecIfNeeded
       bind sock $ addrAddress addr
       listen sock 1024
-      return sock
+      pure sock
     loop sock = forever $
       E.bracketOnError (accept sock) (close . fst) $
         \(conn, _peer) ->

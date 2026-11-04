@@ -1,15 +1,15 @@
 module Main where
 
-import ArgumentsMain
-import CoreIR (prettyCoreProgram)
-import CoreIRToForSyDeIR (translateCoreProgram)
-import ForSyDeIR (prettyIRJSON, prettyIRSystem)
-import ForSyDeIRToProceduralIR (translateIRSystemToProgram)
+import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments)
+import Compiler.CoreIR (prettyCoreProgram)
+import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
+import Compiler.ForSyDeIR (prettyIRJSON, prettyIRSystem)
+import Compiler.ForSyDeIRToProceduralIR (translateIRSystemToProgram)
+import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
+import Compiler.ProceduralIR (prettyProgram)
+import Compiler.ProceduralIRToC (translateProgram)
+import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
 import Options.Applicative
-import ProceduralIR (prettyProgram)
-import ProceduralIRToC (translateProgram)
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
-import Utilities (compileToCoreWithForSyDePath)
 
 {-
 
@@ -62,56 +62,44 @@ generateDefaultFileName f OutputProceduralIR = f ++ ".pir"
 generateDefaultFileName f OutputSchedule = f ++ ".sched"
 
 -- Main function for running after arguments have been returned from main.
--- Need to pattern match based on the arguments used. They are matched on
--- manually since a lot of combinations are invalid.
+-- Pattern matches on the requested output type to determine which stages
+-- of the compilation pipeline are required.
+-- They are matched on manually since a lot of combinations are invalid.
 -- You can't for intance start with procedural IR as input and go to Core
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
--- "Normal run"
-run (Arguments (InputFile input_file) output_file OutputC t inputType r pkgPath) = do
+run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath) = do
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffers forsydeIR of
-        Left e -> error e
-        Right v -> v
-  let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
-  let c = translateProgram proceduralIR t inputType True
-  write_output output_file OutputC c
-run (Arguments (InputFile input_file) output_file OutputForSyDeIR _ _ _ pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  write_output output_file OutputForSyDeIR (prettyIRSystem dflags forsydeIR)
-run (Arguments (InputFile input_file) output_file OutputForSyDeIRJSON _ _ _ pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, _lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  let ir_json = prettyIRJSON forsydeIR
-  write_output output_file OutputForSyDeIRJSON ir_json
-run (Arguments (InputFile input_file) output_file OutputProceduralIR _ inputType r pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, lookupSignals) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  let Schedule (schedule, buffers, delayBuffers) = case computeScheduleAndBuffers forsydeIR of
-        Left e -> error e
-        Right v -> v
-  let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType r forsydeIR
-  write_output output_file OutputProceduralIR (prettyProgram proceduralIR)
-run (Arguments (InputFile input_file) output_file OutputCore _ _ _ pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  write_output output_file OutputCore (prettyCoreProgram dflags core)
-run (Arguments (InputFile input_file) output_file OutputSchedule _ _ _ pkgPath) = do
-  (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let (forsydeIR, _) = case translateCoreProgram dflags core of
-        Left e -> error e
-        Right v -> v
-  write_output output_file OutputSchedule (computeScheduleAndBuffersPrint forsydeIR)
+  let outputIR = case outputType of
+        OutputCore ->
+          prettyCoreProgram dflags core
+        OutputForSyDeIR -> do
+          let (forsydeIR, _) = translateCoreHelper dflags core
+          prettyIRSystem dflags forsydeIR
+        OutputForSyDeIRJSON -> do
+          let (forsydeIR, _) = translateCoreHelper dflags core
+          prettyIRJSON forsydeIR
+        OutputSchedule -> do
+          let (forsydeIR, _) = translateCoreHelper dflags core
+          computeScheduleAndBuffersPrint forsydeIR
+        OutputProceduralIR -> do
+          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
+          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
+          prettyProgram $ translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
+        OutputC -> do
+          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
+          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
+          let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
+          translateProgram proceduralIR target inputType True
+  write_output output_file outputType outputIR
+  where
+    translateCoreHelper dflags core = case translateCoreProgram dflags core of
+      Left e -> error e
+      Right v -> v
+    computeScheduleHelper forsydeIR = case computeScheduleAndBuffers forsydeIR of
+      Left e -> error e
+      Right (Schedule v) -> v
 
 main :: IO ()
 main = run =<< execParser opts

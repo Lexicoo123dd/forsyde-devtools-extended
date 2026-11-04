@@ -24,7 +24,6 @@ common common-options
     co-log-core == 0.3.2.7,
     containers == 0.7,
     filepath == 1.5.4.0,
-    forsyde-atom >=0.3.2 && <=0.3.3,
     forsyde-shallow ==3.5.0.0,
     ghc == 9.10.3,
     ghc-paths == 0.1.0.12,
@@ -42,15 +41,19 @@ library
   hs-source-dirs: src
   exposed-modules:
     ArgumentsMain
-    CoreIR
-    CoreIRToForSyDeIR
-    CoreIRToProceduralIR
-    ForSyDeIR
-    ForSyDeIRToProceduralIR
-    ProceduralIR
-    ProceduralIRToC
-    SDFSchedule
+    Compiler.CoreIR
+    Compiler.CoreIRToForSyDeIR
+    Compiler.CoreIRToProceduralIR
+    Compiler.ForSyDeIR
+    Compiler.ForSyDeIRToProceduralIR
+    Compiler.GHCCoreAPI
+    Compiler.ProceduralIR
+    Compiler.ProceduralIRToC
+    Compiler.Scheduler.SDFSchedule
+    LSP.Uri
     Utilities
+    Visualiser.SKGraphSchema
+    Visualiser.KLighD
 
 library examples
   import: common-options
@@ -68,33 +71,38 @@ executable forsyde-compiler-exe
   build-depends: forsyde-devtools
   other-modules:
     ArgumentsMain
-    CoreIR
-    CoreIRToForSyDeIR
-    CoreIRToProceduralIR
-    ForSyDeIR
-    ForSyDeIRToProceduralIR
-    ProceduralIR
-    ProceduralIRToC
-    SDFSchedule
+    Compiler.CoreIR
+    Compiler.CoreIRToForSyDeIR
+    Compiler.CoreIRToProceduralIR
+    Compiler.ForSyDeIR
+    Compiler.ForSyDeIRToProceduralIR
+    Compiler.GHCCoreAPI
+    Compiler.ProceduralIR
+    Compiler.ProceduralIRToC
+    Compiler.Scheduler.SDFSchedule
     Utilities
 
 executable forsyde-lsp-exe
   import: common-options
   hs-source-dirs: src
-  main-is: LSP.hs
+  main-is: LSP/LSP.hs
   ghc-options:
     -rtsopts
     -with-rtsopts=-N
 
   build-depends: forsyde-devtools
   other-modules:
-    ArgumentsLSP
-    CoreIR
-    CoreIRToForSyDeIR
-    ForSyDeIR
-    ProceduralIR
-    SDFSchedule
-    SKGraphSchema
+    Compiler.CoreIR
+    Compiler.CoreIRToForSyDeIR
+    Compiler.ForSyDeIR
+    Compiler.GHCCoreAPI
+    Compiler.ProceduralIR
+    Compiler.Scheduler.SDFSchedule
+    LSP.API
+    LSP.Arguments
+    LSP.Uri
+    Visualiser.SKGraphSchema
+    Visualiser.KLighD
     Utilities
 
 test-suite forsyde-devtools-test
@@ -108,9 +116,11 @@ test-suite forsyde-devtools-test
 
   other-modules:
     ForSyDeIRSpec
+    LSPUriSpec
     ProceduralIRSpec
     ProceduralIRToCSpec
     SDFScheduleSpec
+    VisualiserKLighDSpec
 
   build-depends:
     forsyde-devtools,

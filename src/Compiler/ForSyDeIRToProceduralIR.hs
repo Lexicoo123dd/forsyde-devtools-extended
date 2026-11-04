@@ -1,10 +1,10 @@
-module ForSyDeIRToProceduralIR where
+module Compiler.ForSyDeIRToProceduralIR where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Runs (Limited, Perpetual))
-import CoreIRToProceduralIR (translateIRFunction)
-import ForSyDeIR
+import Compiler.CoreIRToProceduralIR (translateIRFunction)
+import Compiler.ForSyDeIR
+import Compiler.ProceduralIR
 import GHC hiding (targetId)
-import ProceduralIR
 
 -- | The `TranslationContext` is a data type which is used to pass around
 -- context required to complete the translation of ForSyDeIR to

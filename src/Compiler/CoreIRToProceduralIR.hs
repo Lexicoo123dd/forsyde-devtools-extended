@@ -3,16 +3,16 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module CoreIRToProceduralIR where
+module Compiler.CoreIRToProceduralIR where
 
-import CoreIR (literalToInt, prettyCoreAlt)
+import Compiler.CoreIR (literalToInt, prettyCoreAlt)
+import Compiler.ForSyDeIR
+import Compiler.ProceduralIR
 import Data.List (elemIndex)
 import Data.Maybe (mapMaybe)
-import ForSyDeIR
 import GHC hiding (Type, targetId)
 import GHC.Core
 import GHC.Plugins hiding (Type)
-import ProceduralIR
 import Utilities (Stack, emptyStack, pop, push, stackToList)
 
 -- | The `TranslationContext` is a data type which is used to pass around
