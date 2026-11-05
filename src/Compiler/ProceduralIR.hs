@@ -20,6 +20,7 @@ module Compiler.ProceduralIR
   )
 where
 
+import Compiler.ForSyDeIR
 import Text.Printf (printf)
 import Data.List (intercalate)
 
@@ -67,6 +68,7 @@ data BinaryOperator
 data Type
   = TVoid
   | TInt
+  | TBool
   | TFloat
   | TChar
   | TIdent String
@@ -115,8 +117,8 @@ data Statement
 
 -- Globals
 data Global
-  = GFuncDeclare (Maybe StorageClass) Type String [(Type, String)]
-  | GFuncDef (Maybe StorageClass) Type String [(Type, String)] Statement
+  = GFuncDeclare (Maybe StorageClass) Type String [(Type, String)] ([IRType], [IRType])
+  | GFuncDef (Maybe StorageClass) Type String [(Type, String)] ([IRType], [IRType]) Statement
   | GVarDeclare Type String
   | GVarDef Type String Expression
   | GStruct String [(Type, String)]
@@ -359,35 +361,48 @@ prettyStorageClass storageClass = case storageClass of
   Extern -> "extern"
   TypeDefinition -> "typedef"
 
+prettyIRType :: IRType -> String
+prettyIRType IRIntType = "IntType"
+prettyIRType IRFloatType = "FloatType"
+prettyIRType IRBoolType = "BoolType"
+
 prettyGlobal :: Global -> String
 prettyGlobal global = case global of
-  GFuncDeclare (Just storageClass) returnType fundId parameters ->
+  GFuncDeclare (Just storageClass) returnType fundId parameters (inputTypes, outputTypes) ->
     printf
-      "GFuncDeclare(%s, %s, %s, {%s})"
+      "GFuncDeclare(%s, %s, %s, {%s}, (%s -> %s))"
       (prettyStorageClass storageClass)
       (prettyType returnType)
       (quotes fundId)
       (intercalate ", " (map prettyParam parameters))
-  GFuncDeclare Nothing returnType funcId parameters ->
+      (intercalate ", " (map prettyIRType inputTypes))
+      (intercalate ", " (map prettyIRType outputTypes))
+  GFuncDeclare Nothing returnType funcId parameters (inputTypes, outputTypes) ->
     printf
-      "GFuncDeclare(%s, %s, {%s})"
+      "GFuncDeclare(%s, %s, {%s}, (%s -> s))"
       (prettyType returnType)
       (quotes funcId)
       (intercalate ", " (map prettyParam parameters))
-  GFuncDef (Just storageClass) returnType funcId parameters body ->
+      (intercalate ", " (map prettyIRType inputTypes))
+      (intercalate ", " (map prettyIRType outputTypes))
+  GFuncDef (Just storageClass) returnType funcId parameters (inputTypes, outputTypes) body ->
     printf
-      "GFuncDef(%s, %s, %s, {%s}, %s)"
+      "GFuncDef(%s, %s, %s, {%s}, ([%s] -> [%s]), %s)"
       (prettyStorageClass storageClass)
       (prettyType returnType)
       (quotes funcId)
       (intercalate ", " (map prettyParam parameters))
+      (intercalate ", " (map prettyIRType inputTypes))
+      (intercalate ", " (map prettyIRType outputTypes))
       (prettyStatement body)
-  GFuncDef Nothing returnType funcId parameters body ->
+  GFuncDef Nothing returnType funcId parameters (inputTypes, outputTypes) body ->
     printf
-      "GFuncDef(%s, %s, {%s}, %s)"
+      "GFuncDef(%s, %s, {%s}, ([%s] -> [%s]), %s)"
       (prettyType returnType)
       (quotes funcId)
       (intercalate ", " (map prettyParam parameters))
+      (intercalate ", " (map prettyIRType inputTypes))
+      (intercalate ", " (map prettyIRType outputTypes))
       (prettyStatement body)
   GVarDeclare varType varId ->
     printf

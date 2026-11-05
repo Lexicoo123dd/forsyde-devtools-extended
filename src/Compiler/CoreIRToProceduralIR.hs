@@ -66,21 +66,21 @@ translateIRFunction :: IRFunction -> DynFlags -> [IRConstructor] -> Maybe (Globa
 translateIRFunction function dflags constructors =
   let context = initialTranslationContext dflags
    in case function of
-        IRFunction functionId Nothing ->
+        IRFunction functionId Nothing typeDef ->
           case (findActorFromFunctionId functionId constructors) of
             [] -> Nothing
             actor : _ ->
               let (parameterList, _context1) = getParameterList context actor
-                  (functionDeclarationGlobal) = getFunctionDeclaration parameterList functionId
+                  (functionDeclarationGlobal) = getFunctionDeclaration parameterList functionId typeDef
                in Just (functionDeclarationGlobal, Nothing)
-        IRFunction functionId (Just functionExpr) ->
+        IRFunction functionId (Just functionExpr) typeDef ->
           case (findActorFromFunctionId functionId constructors) of
             [] -> Nothing
             actor : _ ->
               let (parameterList, context1) = getParameterList context actor
-                  functionDeclarationGlobal = getFunctionDeclaration parameterList functionId
+                  functionDeclarationGlobal = getFunctionDeclaration parameterList functionId typeDef
                   context2 = translateFunctionExpr context1 0 0 functionExpr
-                  functionDefinitionGlobal = getFunctionDefinition context2 parameterList functionId
+                  functionDefinitionGlobal = getFunctionDefinition context2 parameterList functionId typeDef
                in Just (functionDeclarationGlobal, Just functionDefinitionGlobal)
 
 -- Helper function which returns the `IRActor`s associated with a provided
@@ -108,15 +108,15 @@ getParameterList context (IRActor _ _ _ (inputSignals, outputSignals)) =
    in (parametersList, context1)
 getParameterList context (IRDelay _ _ _) = ([], context)
 
-getFunctionDeclaration :: [(Type, String)] -> IRId -> Global
-getFunctionDeclaration parameterList functionId =
-  let functionDeclareGlobal = GFuncDeclare (Just Static) TVoid (show functionId) parameterList
+getFunctionDeclaration :: [(Type, String)] -> IRId -> ([IRType], [IRType]) -> Global
+getFunctionDeclaration parameterList functionId typeDef =
+  let functionDeclareGlobal = GFuncDeclare (Just Static) TVoid (show functionId) parameterList typeDef
    in functionDeclareGlobal
 
-getFunctionDefinition :: TranslationContext -> [(Type, String)] -> IRId -> Global
-getFunctionDefinition context parametersList functionId =
+getFunctionDefinition :: TranslationContext -> [(Type, String)] -> IRId -> ([IRType], [IRType]) -> Global
+getFunctionDefinition context parametersList functionId typeDef =
   let stmtScope = scope context
-      functionDefinitionGlobal = GFuncDef (Just Static) TVoid (show functionId) parametersList stmtScope
+      functionDefinitionGlobal = GFuncDef (Just Static) TVoid (show functionId) parametersList typeDef stmtScope
    in functionDefinitionGlobal
 
 -- | Translates the `CoreExpr` associated with an `IRFunction` into a Procedural
