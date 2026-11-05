@@ -18,6 +18,7 @@ module Compiler.ForSyDeIR
     irIdToSpan,
     IRLiteral (..),
     coreLiteralToIR,
+    IRType (..),
   )
 where
 
@@ -49,6 +50,12 @@ data IRLiteral
   = IRInt Int
   | IRFloat Float
   | IRBool Bool
+  deriving (Show, Eq)
+
+data IRType
+  = IntType
+  | FloatType
+  | BoolType
   deriving (Show, Eq)
 
 coreLiteralToIR :: Literal -> Maybe IRLiteral
@@ -150,7 +157,7 @@ data IRConstructor
 data IRSignal = IRSignal IRId (IRId, Int) (IRId, Int)
 
 -- IRFunction(functionId, maybe function)
-data IRFunction = IRFunction IRId (Maybe CoreExpr)
+data IRFunction = IRFunction IRId (Maybe CoreExpr) ([IRType], [IRType])
 
 -- IRSystem((globalInputs, globalOutputs), constructors, signals, functions)
 data IRSystem = IRSystem ([IRId], [IRId]) [IRConstructor] [IRSignal] [IRFunction]
@@ -190,12 +197,12 @@ prettyIRConstructor (IRActor actorId actorType functionId (inputs, outputs)) =
     (intercalate ", " (map prettyIRId outputs))
     (maybe "" prettyIRSpan $ irIdToSpan actorId)
 
-prettyIRFunction :: DynFlags -> IRFunction -> String
-prettyIRFunction dflags (IRFunction functionId function) =
+prettyIRFunction dflags (IRFunction functionId function functionType) =
   printf
-    "IRFunction(\"%s\", %s, %s)"
+    "IRFunction(\"%s\", %s, %s, %s)"
     (show functionId)
     (maybe "" (prettyFunction dflags) function)
+    (show functionType)
     (maybe "" prettyIRSpan $ irIdToSpan functionId)
 
 prettyFunction :: DynFlags -> CoreExpr -> String
@@ -264,10 +271,11 @@ instance ToJSON IRSignal where
       ]
 
 instance ToJSON IRFunction where
-  toJSON (IRFunction name _) =
+  toJSON (IRFunction name _ (inputTypes, outputType)) =
     object
-      [ "name" .= Text.pack (show name)
-      -- "coreexpr" .= ...
+      [ "name" .= Text.pack (show name),
+        "inputTypes" .= Text.pack (show inputTypes),
+        "outputType" .= Text.pack (show outputType)
       ]
 
 instance ToJSON IRSystem where
