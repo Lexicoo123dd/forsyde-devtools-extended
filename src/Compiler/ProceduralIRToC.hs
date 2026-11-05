@@ -159,22 +159,23 @@ translateParam (paramType@(TPointer _pointerType), paramName) =
 translateParam (paramType, paramName) =
   translateType paramType ++ " " ++ paramName
 
+-- TODO: Maybe need to do something here to translate to C
 translateGlobal :: Global -> String
 translateGlobal global = case global of
-  GFuncDeclare (Just storageClass) returnType funcId parameters ->
+  GFuncDeclare (Just storageClass) returnType funcId parameters _ ->
     printf
       "%s %s %s(%s);"
       (prettyStorageClass storageClass)
       (translateType returnType)
       (funcId)
       (intercalate ", " (map translateParam parameters))
-  GFuncDeclare Nothing returnType funcId parameters ->
+  GFuncDeclare Nothing returnType funcId parameters _ ->
     printf
       "%s %s(%s);"
       (translateType returnType)
       (funcId)
       (intercalate ", " (map translateParam parameters))
-  GFuncDef (Just storageClass) returnType funcId parameters body ->
+  GFuncDef (Just storageClass) returnType funcId parameters _ body ->
     printf
       "%s %s %s(%s) %s"
       (prettyStorageClass storageClass)
@@ -182,7 +183,7 @@ translateGlobal global = case global of
       (funcId)
       (intercalate ", " (map translateParam parameters))
       (translateStatement body)
-  GFuncDef Nothing returnType funcId parameters body ->
+  GFuncDef Nothing returnType funcId parameters _ body ->
     printf
       "%s %s(%s) %s"
       (translateType returnType)

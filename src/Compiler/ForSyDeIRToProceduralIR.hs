@@ -114,7 +114,7 @@ translateContextToMain context scheduleList =
           ++ reverse (initDelay context)
       mainFreeStmts = reverse (freeBuffers context) ++ [SReturn (Just (EInt 0))]
       mainBody = SScope (mainInitStmts ++ [whileStmt] ++ mainFreeStmts)
-   in GFuncDef Nothing TInt "main" [] mainBody
+   in GFuncDef Nothing TInt "main" [] ([], []) mainBody
 
 -- | Returns a list of statements corresponding to actor function calls based
 -- on a provided Schedule. Note that actor function call statements include
@@ -129,6 +129,11 @@ scheduleActors context scheduleList = foldl' foldSchedule [] scheduleList
             Just stmts -> stmts
             Nothing -> error ("schedule - actor not found: " ++ show actorId)
        in (acc ++ actorStmts)
+
+irTypeToCType :: IRType -> Compiler.ProceduralIR.Type
+irTypeToCType IRIntType = TInt
+irTypeToCType IRFloatType = TFloat
+irTypeToCType IRBoolType = TBool
 
 -- | Translates a component of the buffer size list provided by the SDF
 -- scheduler into an io token statment, initialisation statement, and freeing
@@ -170,6 +175,16 @@ irLiteralToFormat literal =
     IRInt _ -> "%d\n"
     IRFloat _ -> "%f\n"
     IRBool _ -> "%d\n"
+
+-- NOTE: Greate when this file has access to IRType recived (however that is done!)
+irTypeToFormat :: IRType -> String
+irTypeToFormat irType =
+  case irType of
+    IRIntType -> "%d"
+    IRFloatType -> "%f"
+    IRBoolType -> "%d"
+
+-- TODO: This function might break the delay tokens, dont know
 
 -- | Translates an `IRConstructor` into a set of statements which are used to
 -- update the `TranslationContext`.
