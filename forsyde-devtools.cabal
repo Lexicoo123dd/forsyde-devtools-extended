@@ -50,6 +50,12 @@ library
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
     Compiler.Scheduler.SDFSchedule
+    Compiler.CoreIRToForSyDeIR.Context
+    Compiler.CoreIRToForSyDeIR.CoreAnalysis
+    Compiler.CoreIRToForSyDeIR.Function
+    Compiler.CoreIRToForSyDeIR.Process
+    Compiler.CoreIRToForSyDeIR.Signal
+    Compiler.CoreIRToForSyDeIR.System
     LSP.Uri
     Utilities
     Visualiser.SKGraphSchema
@@ -80,6 +86,12 @@ executable forsyde-compiler-exe
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
     Compiler.Scheduler.SDFSchedule
+    Compiler.CoreIRToForSyDeIR.Context
+    Compiler.CoreIRToForSyDeIR.CoreAnalysis
+    Compiler.CoreIRToForSyDeIR.Function
+    Compiler.CoreIRToForSyDeIR.Process
+    Compiler.CoreIRToForSyDeIR.Signal
+    Compiler.CoreIRToForSyDeIR.System
     Utilities
 
 executable forsyde-lsp-exe
@@ -98,6 +110,12 @@ executable forsyde-lsp-exe
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
     Compiler.Scheduler.SDFSchedule
+    Compiler.CoreIRToForSyDeIR.Context
+    Compiler.CoreIRToForSyDeIR.CoreAnalysis
+    Compiler.CoreIRToForSyDeIR.Function
+    Compiler.CoreIRToForSyDeIR.Process
+    Compiler.CoreIRToForSyDeIR.Signal
+    Compiler.CoreIRToForSyDeIR.System
     LSP.API
     LSP.Arguments
     LSP.Uri
