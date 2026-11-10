@@ -2,7 +2,7 @@ module LSPUriSpec (spec) where
 
 import Data.List (isInfixOf)
 import qualified Data.Text as T
-import LSPUri (filePathToUriText, uriTextToFilePath)
+import LSP.Uri (filePathToUriText, uriTextToFilePath)
 import System.Info (os)
 import Test.Hspec
 

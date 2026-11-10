@@ -1,7 +1,7 @@
 module ProceduralIRSpec (spec) where
 
+import Compiler.ProceduralIR
 import Data.Char (isSpace)
-import ProceduralIR
 import Test.Hspec
 
 exampleProceduralIR :: Program

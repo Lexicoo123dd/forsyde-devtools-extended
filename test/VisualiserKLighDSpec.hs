@@ -4,13 +4,13 @@
 
 module VisualiserKLighDSpec (spec) where
 
+import Compiler.ForSyDeIR
+import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import qualified Data.Text as T
-import ForSyDeIR
-import LSPUri (filePathToUriText)
-import SDFSchedule (Schedule (..))
-import SKGraphSchema
+import LSP.Uri (filePathToUriText)
 import Test.Hspec
 import Visualiser.KLighD (forSyDeIRToGraph)
+import Visualiser.SKGraphSchema
 
 spec :: Spec
 spec = describe "KLighD diagram synthesis" $ do

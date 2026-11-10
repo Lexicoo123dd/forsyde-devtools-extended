@@ -1,9 +1,9 @@
 module ProceduralIRToCSpec (spec) where
 
 import ArgumentsMain
+import Compiler.ProceduralIR
+import Compiler.ProceduralIRToC
 import Data.Char (isSpace)
-import ProceduralIR
-import ProceduralIRToC
 import Test.Hspec
 
 exampleProceduralIR :: Program

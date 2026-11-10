@@ -1,6 +1,6 @@
 module ForSyDeIRSpec (spec) where
 
-import ForSyDeIR
+import Compiler.ForSyDeIR
 import GHC
 import GHC.Data.EnumSet as EnumSet
 import GHC.Paths (libdir)
