@@ -31,6 +31,7 @@ data OutputFormat
   | OutputForSyDeIRJSON
   | OutputProceduralIR
   | OutputSchedule
+  | OutputForSyDeIO
 
 data Target
   = PC
@@ -143,6 +144,7 @@ outputFormatTop =
     <|> outputFormatForSyDeIRJSON
     <|> outputFormatProceduralIR
     <|> outputFormatSchedule
+    <|> outputFormatForSyDeIO
 
 outputFormatC :: Parser OutputFormat
 outputFormatC =
@@ -191,6 +193,14 @@ outputFormatSchedule =
     OutputSchedule
     ( long "output-schedule"
         <> help "Output the SDF schedule to file instead of code"
+    )
+
+outputFormatForSyDeIO :: Parser OutputFormat
+outputFormatForSyDeIO =
+  flag'
+    OutputForSyDeIO
+    ( long "output-forsyde-io"
+        <> help "Output file in ForSyDeIO .fiodl"
     )
 
 targetName :: ReadM Target

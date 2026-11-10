@@ -74,6 +74,7 @@ executable forsyde-compiler-exe
     Compiler.CoreIR
     Compiler.CoreIRToForSyDeIR
     Compiler.CoreIRToProceduralIR
+    Compiler.ForSyDeIO
     Compiler.ForSyDeIR
     Compiler.ForSyDeIRToProceduralIR
     Compiler.GHCCoreAPI

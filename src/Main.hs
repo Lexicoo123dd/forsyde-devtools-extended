@@ -11,6 +11,8 @@ import Compiler.ProceduralIRToC (translateProgram)
 import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
 import Options.Applicative
 
+import Compiler.ForSyDeIO (prettyIOGlobal)
+
 {-
 
     Specification
@@ -60,6 +62,7 @@ generateDefaultFileName f OutputForSyDeIR = f ++ ".fir"
 generateDefaultFileName f OutputForSyDeIRJSON = f ++ ".json"
 generateDefaultFileName f OutputProceduralIR = f ++ ".pir"
 generateDefaultFileName f OutputSchedule = f ++ ".sched"
+generateDefaultFileName f OutputForSyDeIO = f ++ ".fiodl"
 
 -- Main function for running after arguments have been returned from main.
 -- Pattern matches on the requested output type to determine which stages
@@ -92,6 +95,9 @@ run (Arguments (InputFile input_file) output_file outputType target inputType ru
           let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
           let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
           translateProgram proceduralIR target inputType True
+        OutputForSyDeIO -> do
+          let (forsydeIR, _) = translateCoreHelper dflags core
+          prettyIOGlobal forsydeIR
   write_output output_file outputType outputIR
   where
     translateCoreHelper dflags core = case translateCoreProgram dflags core of
