@@ -71,6 +71,7 @@ data Type
   | TBool
   | TFloat
   | TChar
+  | TToken
   | TIdent String
   | TPointer Type -- int *pointer
   | TReference Type -- int &pointer
@@ -171,6 +172,7 @@ prettyType currentType = case currentType of
   TInt -> "TInt"
   TFloat -> "TFloat"
   TChar -> "TChar"
+  TToken -> "TToken"
   TIdent tyId -> printf "TIdent(%s)" (quotes tyId)
   TPointer ty -> printf "TPointer(%s)" (prettyType ty)
   TReference ty -> printf "TReference(%s)" (prettyType ty)

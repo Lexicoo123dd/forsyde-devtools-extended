@@ -19,8 +19,8 @@ import Utilities (Stack, emptyStack, pop, push, stackToList)
 -- context required to complete the translation of Core IR to Procedural IR.
 data TranslationContext = TranslationContext
   { flags :: DynFlags, -- Stores `DynFlags` for safely obtaining strings
-    inputIds :: [String], -- List of input signal names
-    outputIds :: [String], -- List of output signal names
+    inputIds :: [(String, IRType)], -- List of input signal names
+    outputIds :: [(String, IRType)], -- List of output signal names
     functionInputs :: [IRId], -- List of function inputs ids
     functionVariables :: [(IRId, Expression)], -- Associated list of functionIds and expression
     scope :: Statement -- Scope of function definition
@@ -70,14 +70,14 @@ translateIRFunction function dflags constructors =
           case (findActorFromFunctionId functionId constructors) of
             [] -> Nothing
             actor : _ ->
-              let (parameterList, _context1) = getParameterList context actor
+              let (parameterList, _context1) = getParameterList context actor typeDef
                   (functionDeclarationGlobal) = getFunctionDeclaration parameterList functionId typeDef
                in Just (functionDeclarationGlobal, Nothing)
         IRFunction functionId (Just functionExpr) typeDef ->
           case (findActorFromFunctionId functionId constructors) of
             [] -> Nothing
             actor : _ ->
-              let (parameterList, context1) = getParameterList context actor
+              let (parameterList, context1) = getParameterList context actor typeDef
                   functionDeclarationGlobal = getFunctionDeclaration parameterList functionId typeDef
                   context2 = translateFunctionExpr context1 0 0 functionExpr
                   functionDefinitionGlobal = getFunctionDefinition context2 parameterList functionId typeDef
@@ -97,16 +97,16 @@ findActorFromFunctionId targetFunctionId constructors =
 -- Helper function which builds the parameter list for a `ProceduralIR` function
 -- based on the input and output signals of provided actor. Updates the
 -- `TranslationContext` with the input and output ids.
-getParameterList :: TranslationContext -> IRConstructor -> ([(Type, String)], TranslationContext)
-getParameterList context (IRActor _ _ _ (inputSignals, outputSignals)) =
+getParameterList :: TranslationContext -> IRConstructor -> ([IRType], [IRType]) -> ([(Type, String)], TranslationContext)
+getParameterList context (IRActor _ _ _ (inputSignals, outputSignals)) (inputTypes, outputTypes) =
   let inputParameters = map (\(index, _) -> (TPointer (TIdent "token"), "input_" ++ show index)) (zip [1 :: Int ..] inputSignals)
       outputParameters = map (\(index, _) -> (TPointer (TIdent "token"), "output_" ++ show index)) (zip [1 :: Int ..] outputSignals)
       parametersList = inputParameters ++ outputParameters
-      inputIdList = map snd inputParameters
-      outputIdList = map snd outputParameters
+      inputIdList = zip (map snd inputParameters) inputTypes
+      outputIdList = zip (map snd outputParameters) outputTypes
       context1 = context {inputIds = inputIdList, outputIds = outputIdList}
    in (parametersList, context1)
-getParameterList context (IRDelay _ _ _) = ([], context)
+getParameterList context (IRDelay _ _ _) _types = ([], context)
 
 getFunctionDeclaration :: [(Type, String)] -> IRId -> ([IRType], [IRType]) -> Global
 getFunctionDeclaration parameterList functionId typeDef =
@@ -167,6 +167,12 @@ translateFunctionExpr context inputId inputIndex expr = case expr of
         context1 = context {scope = scopeStmt}
      in context1
 
+translateIRTypeToUnionField :: IRType -> String
+translateIRTypeToUnionField IRIntType = "Int"
+translateIRTypeToUnionField IRFloatType = "Float"
+translateIRTypeToUnionField IRBoolType = "Bool"
+translateIRTypeToUnionField irType = error $ "Cannot format this type: " ++ show irType
+
 -- | Helper function which identifies a binder as a function input and updates
 -- the translation context with its associated Procedural IR expression
 translateAltList :: TranslationContext -> [Alt CoreBndr] -> Int -> Int -> TranslationContext
@@ -182,7 +188,11 @@ translateAltList context alts inputId inputIndex = case alts of
     -- translation context
     ":" ->
       let variableId = IRVar (ids !! 0)
-          variableExpression = (EArrayAccess (EVar ("input_" ++ show (inputId + 1))) (EInt inputIndex))
+          -- NOTE: HERE TO CHNAGE INPUT VARIABLE IN FUNCTIONS
+          inputType = snd (inputIds context !! inputId)
+          typeTranslation = translateIRTypeToUnionField inputType
+          variableExpression = EMemberAccess (EArrayAccess (EVar ("input_" ++ show (inputId + 1))) (EInt inputIndex)) (typeTranslation)
+          -- variableExpression = (EArrayAccess (EVar ("input_" ++ show (inputId + 1))) (EInt inputIndex))
           context1 = context {functionVariables = (variableId, variableExpression) : functionVariables context}
           context2 = translateFunctionExpr context1 inputId inputIndex e
        in translateAltList context2 altsTail inputId inputIndex
@@ -230,9 +240,11 @@ translateFunctionContent context contentList =
     -- list of expressions into a list of statements. Each statement in the list
     -- represents an array assign of the output at an incrementing index equal
     -- to an expression.
-    stackToScope :: [Statement] -> (String, [Expression]) -> [Statement]
-    stackToScope acc (outputSignal, exprList) =
-      let outputStmts = map (\(idx, expr) -> SArrayAssign outputSignal (EInt idx) Nothing expr) (zip [0 ..] exprList)
+    stackToScope :: [Statement] -> ((String, IRType), [Expression]) -> [Statement]
+    stackToScope acc ((outputSignalId, outputSignalType), exprList) =
+      -- NOTE: Here is to change the ouptut in a function
+      let typeTranslation = translateIRTypeToUnionField outputSignalType
+          outputStmts = map (\(idx, expr) -> SArrayAssign outputSignalId (EInt idx) (Just typeTranslation) expr) (zip [0 ..] exprList)
        in (acc ++ outputStmts)
     -- Helper function to handle the case when the `FunctionContent` represents
     -- a `BinaryOperator`
