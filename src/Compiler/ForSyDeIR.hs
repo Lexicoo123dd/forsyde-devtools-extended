@@ -56,6 +56,7 @@ data IRType
   = IRIntType
   | IRFloatType
   | IRBoolType
+  | IRUnknownType
   deriving (Show, Eq)
 
 coreLiteralToIR :: Literal -> Maybe IRLiteral
@@ -154,7 +155,7 @@ data IRConstructor
   | IRActor IRId ActorType IRId ([IRId], [IRId])
 
 -- IRSignal(signalId (sourceId, sourceRate) (targetId, targetRate))
-data IRSignal = IRSignal IRId (IRId, Int) (IRId, Int)
+data IRSignal = IRSignal IRId IRType (IRId, Int) (IRId, Int)
 
 -- IRFunction(functionId, maybe function)
 data IRFunction = IRFunction IRId (Maybe CoreExpr) ([IRType], [IRType])

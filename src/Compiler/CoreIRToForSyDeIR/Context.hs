@@ -41,6 +41,7 @@ data TranslationContext = TranslationContext
 data Binder
   = PcId IRId
   | Binding IRId Int
+  deriving (Show)
 
 initialTranslationContext :: DynFlags -> TranslationContext
 initialTranslationContext dflags =

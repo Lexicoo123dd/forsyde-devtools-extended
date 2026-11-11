@@ -134,6 +134,7 @@ irTypeToCType :: IRType -> Compiler.ProceduralIR.Type
 irTypeToCType IRIntType = TInt
 irTypeToCType IRFloatType = TFloat
 irTypeToCType IRBoolType = TBool
+irTypeToCType IRUnknownType = error "Unknown IR type" -- How to handle this error
 
 -- | Translates a component of the buffer size list provided by the SDF
 -- scheduler into an io token statment, initialisation statement, and freeing
@@ -183,6 +184,7 @@ irTypeToFormat irType =
     IRIntType -> "%d"
     IRFloatType -> "%f"
     IRBoolType -> "%d"
+    _ -> error "Unknown type, cant format it" -- How to handle the error?
 
 -- TODO: This function might break the delay tokens, dont know
 
