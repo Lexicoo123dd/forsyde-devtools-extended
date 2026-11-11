@@ -1,8 +1,9 @@
 module Compiler.ProceduralIRToC where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Target (PC, PICO2))
+import Compiler.ForSyDeIR (IRType (..))
 import Compiler.ProceduralIR
-import Data.List (intercalate)
+import Data.List (intercalate, nub)
 import Text.Printf (printf)
 
 indent :: String -> String
@@ -46,6 +47,7 @@ translateType currentType = case currentType of
   TInt -> "int"
   TFloat -> "float"
   TChar -> "char"
+  TToken -> "token"
   TIdent s -> s
   TPointer t -> translateType t ++ " *"
   TReference t -> translateType t ++ "&"
@@ -207,22 +209,52 @@ translateGlobal global = case global of
       (structId)
       (intercalate ",\n" (map translateParam fields))
 
+translateIRType :: IRType -> String
+translateIRType irType =
+  case irType of
+    IRIntType -> "  int Int;"
+    IRFloatType -> "  float Float;"
+    IRBoolType -> "  int Bool;" -- Handle bools in C?
+    IRUnknownType -> ""
+
 translateProgram :: Program -> Target -> InputType -> Bool -> String
 translateProgram (Prog globals) target io includes =
   let targetText = case target of
         PC -> "#define PLATFORM PC\n"
         PICO2 -> "#define PLATFORM PICO2\n"
+
       includeInput = case io of
         StdIn -> ""
         Predefined -> "#include \"input.h\"\n"
-   in let outputProgram =
-            if includes
-              then
-                targetText
-                  ++ "typedef int token;\n#include \"include/common.h\"\n#include <stdio.h>\n"
-                  ++ includeInput
-                  ++ "\n"
-                  ++ intercalate "\n\n" (map translateGlobal globals)
-              else
-                intercalate "\n\n" (map translateGlobal globals)
-       in outputProgram ++ "\n"
+
+      functionTypes =
+        [ (functionName, types)
+        | global <- globals,
+          (functionName, types) <- case global of
+            GFuncDeclare _ _ name _ types -> [(name, types)]
+            GFuncDef _ _ name _ types _ -> [(name, types)]
+            _ -> []
+        ]
+
+      uniqueTypes =
+        nub
+          [ irType
+          | (_, (inputTypes, outputTypes)) <- functionTypes,
+            irType <- inputTypes ++ outputTypes
+          ]
+      unionString =
+        "typedef union types {\n"
+          ++ intercalate "\n" (map (\t -> translateIRType t) uniqueTypes)
+          ++ "\n} token, tokens, Tokens;\n"
+      outputProgram =
+        if includes
+          then
+            targetText
+              ++ unionString
+              ++ "#include \"include/common.h\"\n#include <stdio.h>\n"
+              ++ includeInput
+              ++ "\n"
+              ++ intercalate "\n\n" (map translateGlobal globals)
+          else
+            intercalate "\n\n" (map translateGlobal globals)
+   in (outputProgram ++ "\n")
