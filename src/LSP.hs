@@ -35,7 +35,7 @@ import qualified Language.LSP.Server as LSP
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
-import SDFSchedule (Schedule (..), computeScheduleAndBuffers)
+import Schedule (Schedule (..), computeScheduleAndBuffers)
 import SKGraphSchema
 import System.IO
 import Utilities (compileToCoreWithForSyDePath)
@@ -105,8 +105,8 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
         sigid = parent <> "$L$" <> T.show n
         siglabel = [KLabel {gid = sigid, label = T.show n, properties = [(NodeLabelsPlacement [1, 5, 7])]}]
         buflabel = case sched of
-          Just (Schedule (_, buffers, _)) ->
-            case lookup n buffers of
+          Just s ->
+            case lookup n (schedBufferSizes s) of
               Just size -> [KLabel {gid = sigid, label = "|" <> T.show n <> "| = " <> T.show size, properties = [(NodeLabelsPlacement [1, 5, 7])]}]
               Nothing -> []
           Nothing -> siglabel

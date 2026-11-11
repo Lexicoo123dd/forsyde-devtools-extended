@@ -1,7 +1,7 @@
 module SDFScheduleSpec (spec) where
 
 import ForSyDeIR
-import SDFSchedule
+import Schedule (Schedule (..), computeScheduleAndBuffers)
 import Test.Hspec
 
 ----------------------------------------------------------

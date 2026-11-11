@@ -51,6 +51,7 @@ library
     ProceduralIR
     ProceduralIRToC
     SDFSchedule
+    Schedule
     Utilities
 
 library examples
@@ -78,6 +79,7 @@ executable forsyde-compiler-exe
     ProceduralIR
     ProceduralIRToC
     SDFSchedule
+    Schedule
     Utilities
 
 executable forsyde-lsp-exe
@@ -97,6 +99,7 @@ executable forsyde-lsp-exe
     ForSyDeIR
     ProceduralIR
     SDFSchedule
+    Schedule
     SKGraphSchema
     Utilities
 

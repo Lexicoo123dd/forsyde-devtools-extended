@@ -21,7 +21,7 @@ import GHC.Driver.Main
 import GHC.Paths (libdir)
 import GHC.Plugins hiding (isEmpty)
 import GHC.Tc.Types
-import SDFSchedule (Schedule, computeScheduleAndBuffers)
+import Schedule (Schedule, computeScheduleAndBuffers)
 import System.FilePath (takeBaseName)
 
 newtype Stack a = Stack [a] deriving (Show, Eq)
