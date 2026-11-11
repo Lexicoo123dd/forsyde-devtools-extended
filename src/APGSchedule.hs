@@ -29,7 +29,7 @@ module APGSchedule
   )
 where
 
-import Data.List (foldl', partition, sortBy)
+import Data.List (partition, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Ord (comparing)
 import qualified Data.Vector as V
@@ -229,16 +229,18 @@ helperAPG currentBuffer q actors edges _matrix targetReps presActorInstances pre
 
                       -- For each input edge 'a' on \alpha, establish precedence links
                       inEdgeIdxs = incomingEdgeIndices actors edges actorIdx
+                      selfPrecedence = if j > 1 then [((name actor, j - 1), newInstance)] else []
                       newEdgesForAlpha =
-                        concatMap
-                          ( \edgeIdx ->
-                              let edge = edges !! edgeIdx
-                                  etaName = name (src edge)
-                                  dRaw = dFunction j (cons edge) (initTokens edge) (prod edge)
-                                  d = max 0 dRaw
-                               in [((etaName, k), newInstance) | k <- [1 .. d]]
-                          )
-                          inEdgeIdxs
+                        selfPrecedence
+                          ++ concatMap
+                            ( \edgeIdx ->
+                                let edge = edges !! edgeIdx
+                                    etaName = name (src edge)
+                                    dRaw = dFunction j (cons edge) (initTokens edge) (prod edge)
+                                    d = max 0 dRaw
+                                 in [((etaName, k), newInstance) | k <- [1 .. d]]
+                            )
+                            inEdgeIdxs
 
                       -- Update buffer state: b(i+1) = b(i) + Gamma * v(i)
                       updatedBuf = fireOnce actors edges actorIdx bufAcc
@@ -337,7 +339,7 @@ listSchedulingHuLevel numCores instances presEdges actorCost
           -- 5. Initially, all cores are idle
           initIdleCores = [0 .. numCores - 1]
 
-       in scheduleLoop 0 initIdleCores [] initInDegrees initReady [] succMap huLevels
+       in scheduleLoop 0 initIdleCores [] initInDegrees initReady [] succMap huLevels Map.empty
   where
     -- Discrete-event scheduling loop stepping forward through time
     scheduleLoop ::
@@ -349,8 +351,9 @@ listSchedulingHuLevel numCores instances presEdges actorCost
       [ScheduledFiring] ->                       -- ^ Accumulator of scheduled firings
       Map.Map ActorInstance [ActorInstance] ->   -- ^ Successor map
       Map.Map ActorInstance Int ->               -- ^ Hu-levels lookup map
+      Map.Map IRId Int ->                        -- ^ Actor core affinity map
       Either String [ScheduledFiring]
-    scheduleLoop currentTime idleCores activeTasks inDegrees readyQueue schedAcc succs levels =
+    scheduleLoop currentTime idleCores activeTasks inDegrees readyQueue schedAcc succs levels actorAffinity =
       let -- Check if any running tasks finish at or before currentTime
           (finishedTasks, runningTasks) =
             partition (\at -> atFinishTime at <= currentTime) activeTasks
@@ -388,74 +391,86 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                     schedAcc
                     succs
                     levels
+                    actorAffinity
             else
               -- No tasks finished at this exact tick. Can we assign any ready tasks to idle cores?
-              if not (null idleCores) && not (null readyQueue)
-                then
-                  let -- Sort ready queue by Hu-level DESCENDING (highest priority first).
-                      -- Ties broken deterministically by (Actor ID, Instance #).
-                      sortedReady =
-                        sortBy
-                          ( \a b ->
-                              case compare (levels Map.! b) (levels Map.! a) of
-                                EQ -> compare a b
-                                other -> other
-                          )
-                          readyQueue
+              let sortedReady =
+                    sortBy
+                      ( \a b ->
+                          case compare (levels Map.! b) (levels Map.! a) of
+                            EQ -> compare a b
+                            other -> other
+                      )
+                      readyQueue
 
-                      chosenTask@(chosenActor, _) = head sortedReady
-                      remainingReady = tail sortedReady
+                  -- Find a compatible (idleCore, readyTask) pair respecting actor core affinity
+                  findCandidate [] = Nothing
+                  findCandidate (c : cs) =
+                    let compatible =
+                          filter
+                            ( \(actId, _) ->
+                                case Map.lookup actId actorAffinity of
+                                  Just assignedCore -> assignedCore == c
+                                  Nothing -> True
+                            )
+                            sortedReady
+                     in case compatible of
+                          [] -> findCandidate cs
+                          (task : _) -> Just (c, task)
+               in case (if not (null idleCores) && not (null readyQueue) then findCandidate idleCores else Nothing) of
+                    Just (freeCore, chosenTask@(chosenActor, _)) ->
+                      let remainingReady = filter (/= chosenTask) readyQueue
+                          remainingIdleCores = filter (/= freeCore) idleCores
+                          duration = actorCost chosenActor
+                          startTime = currentTime
+                          finishTime = currentTime + duration
 
-                      freeCore = head idleCores
-                      remainingIdleCores = tail idleCores
+                          newFiring =
+                            ScheduledFiring
+                              { sfCore = freeCore,
+                                sfInstance = chosenTask,
+                                sfStartTime = startTime,
+                                sfEndTime = finishTime
+                              }
 
-                      duration = actorCost chosenActor
-                      startTime = currentTime
-                      finishTime = currentTime + duration
-
-                      newFiring =
-                        ScheduledFiring
-                          { sfCore = freeCore,
-                            sfInstance = chosenTask,
-                            sfStartTime = startTime,
-                            sfEndTime = finishTime
-                          }
-
-                      newActive =
-                        ActiveTask
-                          { atFinishTime = finishTime,
-                            atCore = freeCore,
-                            atInstance = chosenTask
-                          }
-                   in -- Keep assigning in the same tick if more idle cores exist
-                      scheduleLoop
-                        currentTime
-                        remainingIdleCores
-                        (newActive : runningTasks)
-                        inDegrees
-                        remainingReady
-                        (newFiring : schedAcc)
-                        succs
-                        levels
-                else
-                  -- No assignments possible right now. Check termination, deadlock, or advance time.
-                  if length schedAcc == length instances && null runningTasks
-                    then Right (reverse schedAcc)
-                    else
-                      if null runningTasks && null readyQueue
-                        then Left "Scheduler deadlock: cyclic dependency or unreachable tasks detected in APG."
+                          newActive =
+                            ActiveTask
+                              { atFinishTime = finishTime,
+                                atCore = freeCore,
+                                atInstance = chosenTask
+                              }
+                          updatedAffinity = Map.insert chosenActor freeCore actorAffinity
+                       in -- Keep assigning in the same tick if more idle cores exist
+                          scheduleLoop
+                            currentTime
+                            remainingIdleCores
+                            (newActive : runningTasks)
+                            inDegrees
+                            remainingReady
+                            (newFiring : schedAcc)
+                            succs
+                            levels
+                            updatedAffinity
+                    Nothing ->
+                      -- No assignments possible right now. Check termination, deadlock, or advance time.
+                      if length schedAcc == length instances && null runningTasks
+                        then Right (reverse schedAcc)
                         else
-                          -- Advance simulation clock to the earliest completion time among active tasks
-                          let nextTime = minimum (map atFinishTime runningTasks)
-                           in scheduleLoop
-                                nextTime
-                                idleCores
-                                runningTasks
-                                inDegrees
-                                readyQueue
-                                schedAcc
-                                succs
-                                levels
+                          if null runningTasks
+                            then Left "Scheduler deadlock: cyclic dependency or unreachable tasks detected in APG."
+                            else
+                              -- Advance simulation clock to the earliest completion time among active tasks
+                              let nextTime = minimum (map atFinishTime runningTasks)
+                               in scheduleLoop
+                                    nextTime
+                                    idleCores
+                                    runningTasks
+                                    inDegrees
+                                    readyQueue
+                                    schedAcc
+                                    succs
+                                    levels
+                                    actorAffinity
 
 -- | Groups the flat scheduled firings by Core ID, ordered chronologically.
 toPerCoreSchedule :: Int -> [ScheduledFiring] -> MultiCoreSchedule
