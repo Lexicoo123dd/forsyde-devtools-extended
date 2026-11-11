@@ -62,7 +62,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
       foldr f [] sigs
       where
         f signal acc =
-          let IRSignal name (sourceProcess, rate) _ = signal
+          let IRSignal name _ (sourceProcess, rate) _ = signal
            in if sourceProcess == proc then (name, rate) : acc else acc
 
     -- \| Find all signals which the process is the target of
@@ -70,7 +70,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
       foldr f [] sigs
       where
         f signal acc =
-          let IRSignal name _ (targetProcess, rate) = signal
+          let IRSignal name _ _ (targetProcess, rate) = signal
            in if targetProcess == proc then (name, rate) : acc else acc
 
     -- \| Helper to create signal label, including buffersize if schedule is known
@@ -116,7 +116,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
         )
 
     -- \| Create an edge from an IRSignal, depends on port id
-    createEdge (IRSignal name (sourceName, sourceRate) (targetName, targetRate)) = edge
+    createEdge (IRSignal name _ (sourceName, sourceRate) (targetName, targetRate)) = edge
       where
         sourcePort = "$root$N$" <> T.show sourceName <> "$P$" <> T.show name
         targetPort = "$root$N$" <> T.show targetName <> "$P$" <> T.show name

@@ -343,14 +343,14 @@ getSourceRate :: TranslationContext -> IRId -> Int
 getSourceRate context signalId =
   let signal = lookup signalId (lookupSignals context)
    in case signal of
-        Just (IRSignal _ (_, rate) _) -> rate
+        Just (IRSignal _ _ (_, rate) _) -> rate
         Nothing -> error ("getSourceRate - signal not found: " ++ show signalId)
 
 getTargetRate :: TranslationContext -> IRId -> Int
 getTargetRate context signalId =
   let signal = lookup signalId (lookupSignals context)
    in case signal of
-        Just (IRSignal _ _ (_, rate)) -> rate
+        Just (IRSignal _ _ _ (_, rate)) -> rate
         Nothing -> error ("getTargetRate - signal not found: " ++ show signalId)
 
 -- Get the rate from the schedule given an ActorId and bufferList

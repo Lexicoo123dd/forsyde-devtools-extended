@@ -104,7 +104,7 @@ updateSystemOutput initialContext outputId = do
   (sourceId, sourceRate) <- getSourceFromArgument context1 outputId
   if not (outputId `elem` (map fst (signals context1)))
     then
-      let newSignal = IRSignal outputId (sourceId, sourceRate) (outputId, 1)
+      let newSignal = IRSignal outputId IRUnknownType (sourceId, sourceRate) (outputId, 1)
           context2 =
             context1
               { systemOutputs = outputId : (systemOutputs context1),
