@@ -21,8 +21,8 @@ module Compiler.ProceduralIR
 where
 
 import Compiler.ForSyDeIR
-import Text.Printf (printf)
 import Data.List (intercalate)
+import Text.Printf (printf)
 
 data StorageClass
   = Auto
@@ -365,6 +365,7 @@ prettyIRType :: IRType -> String
 prettyIRType IRIntType = "IntType"
 prettyIRType IRFloatType = "FloatType"
 prettyIRType IRBoolType = "BoolType"
+prettyIRType _ = "Should not come here..."
 
 prettyGlobal :: Global -> String
 prettyGlobal global = case global of

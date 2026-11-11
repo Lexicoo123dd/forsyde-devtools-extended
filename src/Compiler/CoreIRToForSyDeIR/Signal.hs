@@ -16,6 +16,7 @@ module Compiler.CoreIRToForSyDeIR.Signal (createSignalsFromArguments, updateCons
 
 import Compiler.CoreIRToForSyDeIR.Context
 import Compiler.ForSyDeIR
+import Debug.Trace
 
 -- | Creates signals based on the arguments of a process constructor. All
 -- signals created with this function have the process constructor as the
@@ -96,7 +97,46 @@ updateConstructorsAndSignals :: TranslationContext -> Either String TranslationC
 updateConstructorsAndSignals initialContext = do
   let initialSignals = map snd (signals initialContext)
   (context1, sigs) <- foldl' aux (pure (initialContext, [])) initialSignals
-  pure context1 {signals = sigs}
+  let finalContext = context1 {signals = sigs}
+
+  let signalList = signals finalContext
+  let actorFunctions =
+        [ (actor, function)
+        | (_, actor@(IRActor _ _ functionId _)) <- constructors finalContext,
+          Just function <- [lookup functionId (functions finalContext)]
+        ]
+  let connections =
+        [ (inputSignals, outputSignals, inputTypes, outputTypes)
+        | ( IRActor _ _ _ (inputSignals, outputSignals),
+            IRFunction _ _ (inputTypes, outputTypes)
+            ) <-
+            actorFunctions
+        ]
+  let typedInputs =
+        [ zip inputSignals inputTypes
+        | (inputSignals, _, inputTypes, _) <- connections
+        ]
+
+  let typedOutputs =
+        [ zip outputSignals outputTypes
+        | (_, outputSignals, _, outputTypes) <- connections
+        ]
+  let allTypedConnections = concat typedInputs ++ concat typedOutputs
+
+  let updatedSignals =
+        [ case lookup signalId allTypedConnections of
+            Just signalType ->
+              (signalId, IRSignal signalId signalType source target)
+            Nothing ->
+              (signalId, IRSignal signalId IRUnknownType source target)
+        | (signalId, IRSignal _ _ source target) <- signals finalContext
+        ]
+
+  trace
+    ( "udpated signals: "
+        ++ show updatedSignals
+    )
+    (pure finalContext)
   where
     aux :: Either String (TranslationContext, [(IRId, IRSignal)]) -> IRSignal -> Either String (TranslationContext, [(IRId, IRSignal)])
     aux acc' currentSignal@(IRSignal signalId (sourceId, sourceRate) (targetId, targetRate)) = do
