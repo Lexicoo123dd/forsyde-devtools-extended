@@ -37,6 +37,8 @@ import LSP.Uri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
+import Schedule (Schedule (..), computeScheduleAndBuffers)
+import SKGraphSchema
 import System.IO
 import Visualiser.KLighD (forSyDeIRToGraph)
 

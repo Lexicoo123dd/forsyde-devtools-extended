@@ -52,6 +52,7 @@ library
     Compiler.ProceduralIRToC
     Compiler.Scheduler.SDFSchedule
     LSP.Uri
+    Schedule
     Utilities
     Visualiser.SKGraphSchema
     Visualiser.KLighD
@@ -82,6 +83,7 @@ executable forsyde-compiler-exe
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
     Compiler.Scheduler.SDFSchedule
+    Schedule
     Utilities
 
 executable forsyde-lsp-exe
@@ -106,6 +108,7 @@ executable forsyde-lsp-exe
     Visualiser.SKGraphSchema
     Visualiser.KLighD
     APGSchedule
+    Schedule
     Utilities
 
 test-suite forsyde-devtools-test

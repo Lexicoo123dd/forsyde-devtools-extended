@@ -2,6 +2,7 @@ module SDFScheduleSpec (spec) where
 
 import Compiler.ForSyDeIR
 import Compiler.Scheduler.SDFSchedule
+import Schedule (Schedule (..), computeScheduleAndBuffers)
 import Test.Hspec
 
 ----------------------------------------------------------
