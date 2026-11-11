@@ -16,7 +16,6 @@ module Compiler.CoreIRToForSyDeIR.Signal (createSignalsFromArguments, updateCons
 
 import Compiler.CoreIRToForSyDeIR.Context
 import Compiler.ForSyDeIR
-import Debug.Trace
 
 -- | Creates signals based on the arguments of a process constructor. All
 -- signals created with this function have the process constructor as the
@@ -36,7 +35,7 @@ createSignalsFromArguments context pcId arguments =
       case getSourceFromArgument currentContext argument of
         Left e -> Left e
         Right (sourceId, sourceRate) ->
-          let newSignal = IRSignal argument (sourceId, sourceRate) (pcId, rate)
+          let newSignal = IRSignal argument IRUnknownType (sourceId, sourceRate) (pcId, rate)
               newSignals = (argument, newSignal) : (signals currentContext)
               context1 = currentContext {signals = newSignals}
            in pure $ updateConstructorsInputs context1 pcId argument
@@ -99,7 +98,6 @@ updateConstructorsAndSignals initialContext = do
   (context1, sigs) <- foldl' aux (pure (initialContext, [])) initialSignals
   let finalContext = context1 {signals = sigs}
 
-  let signalList = signals finalContext
   let actorFunctions =
         [ (actor, function)
         | (_, actor@(IRActor _ _ functionId _)) <- constructors finalContext,
@@ -132,14 +130,12 @@ updateConstructorsAndSignals initialContext = do
         | (signalId, IRSignal _ _ source target) <- signals finalContext
         ]
 
-  trace
-    ( "udpated signals: "
-        ++ show updatedSignals
-    )
-    (pure finalContext)
+  let finalContext' = finalContext {signals = updatedSignals}
+
+  pure finalContext'
   where
     aux :: Either String (TranslationContext, [(IRId, IRSignal)]) -> IRSignal -> Either String (TranslationContext, [(IRId, IRSignal)])
-    aux acc' currentSignal@(IRSignal signalId (sourceId, sourceRate) (targetId, targetRate)) = do
+    aux acc' currentSignal@(IRSignal signalId _ (sourceId, sourceRate) (targetId, targetRate)) = do
       (currentContext, acc) <- acc'
       let maybebinder = lookup sourceId (binders currentContext)
        in case maybebinder of
@@ -150,7 +146,7 @@ updateConstructorsAndSignals initialContext = do
                 case (lookup pcId (pcRates currentContext)) of
                   Nothing -> Left ("updateConstructorsAndSignals - No rates found for process constructor: " ++ show pcId)
                   Just (_, outRates) -> do
-                    let newSig = IRSignal signalId (pcId, outRates !! sourceRate) (targetId, targetRate)
+                    let newSig = IRSignal signalId IRUnknownType (pcId, outRates !! sourceRate) (targetId, targetRate)
                     context1 <- updateConstructorsOutputs currentContext signalId pcId sourceRate
                     pure (context1, (signalId, newSig) : acc)
               _ -> Left ("updateConstructorsAndSignals - Binder is not associated with any process constructors")

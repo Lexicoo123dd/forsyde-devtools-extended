@@ -155,7 +155,7 @@ data IRConstructor
   | IRActor IRId ActorType IRId ([IRId], [IRId])
 
 -- IRSignal(signalId (sourceId, sourceRate) (targetId, targetRate))
-data IRSignal = IRSignal IRId IRType (IRId, Int) (IRId, Int)
+data IRSignal = IRSignal IRId IRType (IRId, Int) (IRId, Int) deriving (Show)
 
 -- IRFunction(functionId, maybe function)
 data IRFunction = IRFunction IRId (Maybe CoreExpr) ([IRType], [IRType])
@@ -169,10 +169,11 @@ indent :: Int -> String -> String
 indent numberSpaces = unlines . map (replicate numberSpaces ' ' ++) . lines
 
 prettyIRSignal :: IRSignal -> String
-prettyIRSignal (IRSignal signalId (inputId, inputRate) (outputId, outputRate)) =
+prettyIRSignal (IRSignal signalId signalType (inputId, inputRate) (outputId, outputRate)) =
   printf
-    "IRSignal(\"%s\", (\"%s\", %d), (\"%s\", %d), %s)"
+    "IRSignal(\"%s\", %s (\"%s\", %d), (\"%s\", %d), %s)"
     (show signalId)
+    (show signalType)
     (show inputId)
     inputRate
     (show outputId)
@@ -257,9 +258,10 @@ instance ToJSON IRConstructor where
       ]
 
 instance ToJSON IRSignal where
-  toJSON (IRSignal name (source, sourceRate) (target, targetRate)) =
+  toJSON (IRSignal name signalType (source, sourceRate) (target, targetRate)) =
     object
       [ "name" .= Text.pack (show name),
+        "type" .= Text.pack (show signalType),
         "source"
           .= object
             [ "name" .= Text.pack (show source),
