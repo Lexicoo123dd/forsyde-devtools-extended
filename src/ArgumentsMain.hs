@@ -1,6 +1,8 @@
 module ArgumentsMain where
 
+import Data.Char (toLower)
 import Options.Applicative
+import Schedule (SchedulingStrategy (..))
 
 -- Which file to use for input
 data Input
@@ -38,14 +40,17 @@ data OutputFormat
 data Target
   = PC
   | PICO2
+  deriving (Show, Eq)
 
 data InputType
   = StdIn
   | Predefined
+  deriving (Show, Eq)
 
 data Runs
   = Limited Int
   | Perpetual
+  deriving (Show, Eq)
 
 data SchedulePrint
   = NoSchedulePrint
@@ -66,8 +71,8 @@ data Arguments = Arguments
     runs :: Runs,
     -- Path to the package DB containing ForSyDe Shallow
     forSyDePath :: Maybe FilePath,
-    -- Multi-core options
-    multicore :: Bool,
+    -- Scheduling strategy
+    scheduleStrategy :: SchedulingStrategy,
     printSchedule :: SchedulePrint,
     numCores :: Int
   }
@@ -297,16 +302,30 @@ forSyDePathOption =
         <> help "The path to the ForSyDe Shallow package (unspecified by default)"
     )
 
--- Flag signifying that we want multi-core
-multicoreOption :: Parser Bool
-multicoreOption =
-  switch
-    ( short 'm'
-        <> long "multicore"
-        <> long "multi-core"
-        <> long "mc"
-        <> help "Enable multi-core execution"
+data StrategyType
+  = StrategyGreedy
+  | StrategyHuLevel
+  deriving (Show, Eq)
+
+-- Flag for scheduling strategy: defaults to greedy.
+scheduleStrategyOption :: Parser StrategyType
+scheduleStrategyOption =
+  option
+    (str >>= parseStrategy)
+    ( long "scheduleStrategy"
+        <> long "schedule-strategy"
+        <> long "strategy"
+        <> metavar "STRATEGY"
+        <> value StrategyGreedy
+        <> help "Scheduling strategy to use: greedy (default), hu-level"
     )
+  where
+    parseStrategy s = case map toLower s of
+      "greedy" -> pure StrategyGreedy
+      "hu-level" -> pure StrategyHuLevel
+      "hulevel" -> pure StrategyHuLevel
+      "hu" -> pure StrategyHuLevel
+      other -> readerError ("Unknown scheduling strategy '" ++ other ++ "'. Supported strategies: greedy, hu-level")
 
 -- Optional flag for schedule printing: defaults to stdout if -s or --print-schedule is given. Default when omitted is not to print (NoSchedulePrint).
 schedulePrintOption :: Parser SchedulePrint
@@ -349,7 +368,7 @@ numCoresOption =
 -- Top level argument parsing function
 arguments :: Parser Arguments
 arguments =
-  Arguments
+  assembleArguments
     <$> inputFile
     <*> outputFileTop
     <*> outputFormatTop
@@ -357,6 +376,22 @@ arguments =
     <*> ioTop
     <*> runsTop
     <*> forSyDePathOption
-    <*> multicoreOption
+    <*> scheduleStrategyOption
     <*> schedulePrintOption
     <*> numCoresOption
+  where
+    assembleArguments inF outF outFmt tgt io r pkg stratType printSched nCores =
+      Arguments
+        { input = inF,
+          output = outF,
+          output_format = outFmt,
+          target = tgt,
+          iType = io,
+          runs = r,
+          forSyDePath = pkg,
+          scheduleStrategy = case stratType of
+            StrategyGreedy -> Greedy
+            StrategyHuLevel -> HuLevel nCores,
+          printSchedule = printSched,
+          numCores = nCores
+        }
