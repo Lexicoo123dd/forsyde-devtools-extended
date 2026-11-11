@@ -1,7 +1,7 @@
 module Compiler.ForSyDeIRToProceduralIR where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Runs (Limited, Perpetual))
-import Compiler.CoreIRToProceduralIR (translateIRFunction)
+import Compiler.CoreIRToProceduralIR (translateIRFunction, translateIRTypeToUnionField)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
 import GHC hiding (targetId)
@@ -141,6 +141,7 @@ irTypeToCType IRUnknownType = error "Unknown IR type" -- How to handle this erro
 -- statement which are used to update the `TranslationContext`. Note that io
 -- token statements are only created for buffers which relate to with system
 -- inputs and outputs.
+-- NOTE: HERE IS THE HARDOCDED INPUT/OUTPUT BUFFERS
 translateBuffer :: TranslationContext -> (IRId, Int) -> TranslationContext
 translateBuffer initialContext (bufferId, bufferSize) =
   let initStmt = SVarDef (TPointer (TIdent "buffer_nonblocking")) (show bufferId) (ECall "buffer_nonblocking_new" [EInt bufferSize])
@@ -149,7 +150,7 @@ translateBuffer initialContext (bufferId, bufferSize) =
         then case (inputType initialContext) of
           -- If stdin is used, then need to define input handling arrays
           StdIn ->
-            let ioTokenStmt = SArrayDecl TInt ("input_" ++ show bufferId) [EInt bufferSize]
+            let ioTokenStmt = SArrayDecl TToken ("input_" ++ show bufferId) [EInt bufferSize]
              in initialContext {ioTokens = ioTokenStmt : ioTokens initialContext, initBuffers = initStmt : initBuffers initialContext, freeBuffers = freeStmt : freeBuffers initialContext}
           -- If input is predefined, then do not create "input_" arrays.
           -- But you still need to create the "s_" buffers for those signals
@@ -158,7 +159,7 @@ translateBuffer initialContext (bufferId, bufferSize) =
         else
           if (elem bufferId (systemOutputs initialContext))
             then
-              let ioTokenStmt = SVarDecl TInt ("output_" ++ show bufferId)
+              let ioTokenStmt = SVarDecl TToken ("output_" ++ show bufferId)
                in initialContext {ioTokens = ioTokenStmt : ioTokens initialContext, initBuffers = initStmt : initBuffers initialContext, freeBuffers = freeStmt : freeBuffers initialContext}
             else
               initialContext {initBuffers = initStmt : initBuffers initialContext, freeBuffers = freeStmt : freeBuffers initialContext}
@@ -185,6 +186,12 @@ irTypeToFormat irType =
     IRFloatType -> "%f"
     IRBoolType -> "%d"
     _ -> error "Unknown type, cant format it" -- How to handle the error?
+
+getSignalType :: TranslationContext -> IRId -> IRType
+getSignalType context signalId =
+  case lookup signalId (lookupSignals context) of
+    Just (IRSignal _ signalType _ _) -> signalType
+    Nothing -> error ("getSignalType - signal not found: " ++ show signalId)
 
 -- TODO: This function might break the delay tokens, dont know
 
@@ -257,7 +264,21 @@ translateIRConstructor initialContext constructor = case constructor of
                     (SVarDef TInt "i" (ECall "contained_tokens" [EVar $ show signalId]))
                     (EBinOp Less (EVar "i") (EInt (bufferSize)))
                     (SExpr (EUnOp Increment (EVar "i")))
-                    (SScope [SVarAssign "status" (ECall "scanf" [EString "%d", EReference (EArrayAccess (EVar ("input_" ++ show signalId)) (EVar "i"))])])
+                    ( SScope
+                        [ SVarAssign
+                            "status"
+                            ( ECall
+                                "scanf"
+                                [ EString (irTypeToFormat (getSignalType initialContext signalId)),
+                                  EReference
+                                    ( EMemberAccess
+                                        (EArrayAccess (EVar ("input_" ++ show signalId)) (EVar "i"))
+                                        (translateIRTypeToUnionField (getSignalType initialContext signalId))
+                                    )
+                                ]
+                            )
+                        ]
+                    )
                 breakIfStmt = SIf (EBinOp Less (EVar "status") (EInt 1)) (SScope [SBreak]) Nothing
                 writeForStmt =
                   SFor
@@ -307,8 +328,9 @@ translateIRConstructor initialContext constructor = case constructor of
                   scopeStmt =
                     SScope
                       [ SExpr (ECall "read_token" [EVar $ show signalId, EReference (EVar ("output_" ++ show signalId))]),
-                        SExpr (ECall "printf" [EString "%d ", EVar ("output_" ++ show signalId)])
+                        SExpr (ECall "printf" [EString (irTypeToFormat (getSignalType initialContext signalId) ++ " "), EVar ("output_" ++ show signalId ++ "." ++ (translateIRTypeToUnionField (getSignalType initialContext signalId)))])
                       ]
+
                   forStmt =
                     SFor
                       (SVarDef TInt "i" (EInt 0))
