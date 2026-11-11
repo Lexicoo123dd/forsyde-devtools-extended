@@ -49,7 +49,7 @@ static inline void buffer_blocking_init(buffer_blocking *buf, size_t size) {
     spsc_queue_init(buf, cap);
 }
 
-static inline buffer_blocking *buffer_blocking_new(size_t size) {
+static inline buffer_blocking *buffer_blocking_raw_new(size_t size) {
     buffer_blocking *buf = (buffer_blocking *)malloc(sizeof(buffer_blocking));
     if (!buf) return NULL;
     size_t cap = spsc_next_power_of_two(size);
@@ -60,7 +60,7 @@ static inline buffer_blocking *buffer_blocking_new(size_t size) {
     return buf;
 }
 
-static inline void buffer_blocking_free(buffer_blocking *buf) {
+static inline void buffer_blocking_raw_free(buffer_blocking *buf) {
     if (buf) {
         spsc_queue_free(buf);
         free(buf);
@@ -79,6 +79,12 @@ static inline void read_token_blocking(buffer_blocking *buf, token *data) {
         SPSC_CPU_PAUSE();
     }
     *data = (token)(intptr_t)item;
+}
+
+static inline size_t contained_tokens_blocking(buffer_blocking *buf) {
+    const size_t head = atomic_load_explicit(&buf->head, memory_order_relaxed);
+    const size_t tail = atomic_load_explicit(&buf->tail, memory_order_relaxed);
+    return head - tail;
 }
 
 #endif // BUFFER_BLOCKING_H
