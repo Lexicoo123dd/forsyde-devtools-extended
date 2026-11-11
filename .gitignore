@@ -45,4 +45,5 @@ result-*
 
 # Ignore temporary and testing directories
 tmp/
+test_runs/
 examples/implementation/platform_independent/test/

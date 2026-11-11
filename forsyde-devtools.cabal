@@ -114,6 +114,7 @@ test-suite forsyde-devtools-test
     -with-rtsopts=-N
 
   other-modules:
+    ComparisonSpec
     ForSyDeIRSpec
     ProceduralIRSpec
     ProceduralIRToCSpec
