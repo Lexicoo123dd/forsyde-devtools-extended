@@ -74,7 +74,8 @@ data Arguments = Arguments
     -- Scheduling strategy
     scheduleStrategy :: SchedulingStrategy,
     printSchedule :: SchedulePrint,
-    numCores :: Int
+    numCores :: Int,
+    benchmark :: Bool
   }
 
 -- Handle file input, always need to define a file
@@ -365,6 +366,16 @@ numCoresOption =
         <> help "Number of cores to use for multi-core scheduling (default: 2)"
     )
 
+-- Optional flag to include BENCH_START() and BENCH_END() timing hooks in generated C.
+benchmarkOption :: Parser Bool
+benchmarkOption =
+  switch
+    ( long "benchmark"
+        <> long "timing"
+        <> long "bench"
+        <> help "Include BENCH_START() and BENCH_END() timing hooks in generated C code (disabled by default)"
+    )
+
 -- Top level argument parsing function
 arguments :: Parser Arguments
 arguments =
@@ -379,8 +390,9 @@ arguments =
     <*> scheduleStrategyOption
     <*> schedulePrintOption
     <*> numCoresOption
+    <*> benchmarkOption
   where
-    assembleArguments inF outF outFmt tgt io r pkg stratType printSched nCores =
+    assembleArguments inF outF outFmt tgt io r pkg stratType printSched nCores bench =
       Arguments
         { input = inF,
           output = outF,
@@ -393,5 +405,6 @@ arguments =
             StrategyGreedy -> Greedy
             StrategyHuLevel -> HuLevel nCores,
           printSchedule = printSched,
-          numCores = nCores
+          numCores = nCores,
+          benchmark = bench
         }

@@ -86,6 +86,7 @@ data TranslationContext = TranslationContext
   { flags :: DynFlags, -- Stores `DynFlags` for safely obtaining strings
     inputType :: InputType, -- Type of input handling for the program (stin or predefined)
     runs :: Runs, -- In case of predefined input, how many times to run the SDF model
+    benchmarkEnabled :: Bool, -- Whether to emit BENCH_START and BENCH_END hooks
     lookupSignals :: [(IRId, IRSignal)],
     actors :: [(IRId, [Statement])], -- Associated list of actor ids and statements
     signals :: [(IRId, Statement)], -- Associated list of signal ids and statement
@@ -101,12 +102,13 @@ data TranslationContext = TranslationContext
     functions :: [Global]
   }
 
-initialTranslationContext :: DynFlags -> InputType -> Runs -> [(IRId, IRSignal)] -> [(IRId, Int)] -> [IRId] -> [IRId] -> [(IRId, IRId)] -> TranslationContext
-initialTranslationContext dflags input r lookupSignalList bList inputList outputList delayBufferList =
+initialTranslationContext :: DynFlags -> InputType -> Runs -> Bool -> [(IRId, IRSignal)] -> [(IRId, Int)] -> [IRId] -> [IRId] -> [(IRId, IRId)] -> TranslationContext
+initialTranslationContext dflags input r isBench lookupSignalList bList inputList outputList delayBufferList =
   TranslationContext
     { flags = dflags,
       inputType = input,
       runs = r,
+      benchmarkEnabled = isBench,
       lookupSignals = lookupSignalList,
       actors = [],
       signals = [],
@@ -131,23 +133,24 @@ translateScheduleToProgram ::
   Target ->
   InputType ->
   Runs ->
+  Bool ->
   IRSystem ->
   Program
-translateScheduleToProgram dflags schedule lookupSignalList target input r irSystem@(IRSystem (inputList, outputList) constructors _signalList functionList) =
+translateScheduleToProgram dflags schedule lookupSignalList target input r isBench irSystem@(IRSystem (inputList, outputList) constructors _signalList functionList) =
   let cores = schedCores schedule
       bufferList = schedBufferSizes schedule
       delayBufferList = schedDelayBuffers schedule
    in if length cores <= 1
         then -- Single core execution
           let flatSchedule = toFlatSchedule schedule
-              initialContext = initialTranslationContext dflags input r lookupSignalList bufferList inputList outputList delayBufferList
+              initialContext = initialTranslationContext dflags input r isBench lookupSignalList bufferList inputList outputList delayBufferList
               context1 = foldl' translateIRConstructor initialContext constructors
               context2 = foldl' (translateBuffer cores) context1 bufferList
               context3 = foldl' (translateIRFunctionToGlobals constructors) context2 functionList
               main = translateContextToMain context3 flatSchedule
            in Prog (reverse (initFunctions context3) ++ [main] ++ reverse (functions context3))
         else -- Multi core execution
-          translateMultiCoreProgram dflags schedule lookupSignalList target constructors functionList inputList outputList irSystem
+          translateMultiCoreProgram dflags schedule lookupSignalList target constructors functionList inputList outputList isBench irSystem
 
 -- | Translates a multi-core schedule into a multi-threaded Program.
 translateMultiCoreProgram ::
@@ -159,16 +162,17 @@ translateMultiCoreProgram ::
   [IRFunction] ->
   [IRId] ->
   [IRId] ->
+  Bool ->
   IRSystem ->
   Program
-translateMultiCoreProgram dflags schedule lookupSignalList target constructors functionList inputList outputList _irSystem =
+translateMultiCoreProgram dflags schedule lookupSignalList target constructors functionList inputList outputList isBench _irSystem =
   let cores = schedCores schedule
       bufferList = schedBufferSizes schedule
       delayBufferList = schedDelayBuffers schedule
       numCores = length cores
 
       -- Multi-core uses Predefined input mode with input.h
-      initialContext = initialTranslationContext dflags Predefined (Limited 1) lookupSignalList bufferList inputList outputList delayBufferList
+      initialContext = initialTranslationContext dflags Predefined (Limited 1) isBench lookupSignalList bufferList inputList outputList delayBufferList
       context1 = foldl' translateIRConstructor initialContext constructors
       context2 = foldl' (translateIRFunctionToGlobals constructors) context1 functionList
 
@@ -293,20 +297,22 @@ makeMultiCoreMain context cores bufferList delayBufferList constructors target n
                         EVar "NULL"
                       ]
                   )
-              benchStart = SExpr (ECall "BENCH_START" [])
+              benchStartStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_START" [])] else []
+              benchEndStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_END" [])] else []
               runCore0 = SExpr (ECall "run_core_0" [EVar "NULL"])
               joinThread c = SExpr (ECall "pthread_join" [EVar ("thread_" ++ show c), EVar "NULL"])
-              benchEnd = SExpr (ECall "BENCH_END" [])
            in map threadDecl otherCores
-                ++ [benchStart]
+                ++ benchStartStmts
                 ++ map createThread otherCores
                 ++ [runCore0]
                 ++ map joinThread otherCores
-                ++ [benchEnd]
+                ++ benchEndStmts
         PICO2 ->
-          let launchCore1 = SExpr (ECall "multicore_launch_core1" [EVar "run_core_1"])
+          let benchStartStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_START" [])] else []
+              benchEndStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_END" [])] else []
+              launchCore1 = SExpr (ECall "multicore_launch_core1" [EVar "run_core_1"])
               runCore0 = SExpr (ECall "run_core_0" [])
-           in [launchCore1, runCore0]
+           in benchStartStmts ++ [launchCore1, runCore0] ++ benchEndStmts
 
       freeStmts = map (\(bId, _) -> SExpr (ECall "buffer_free" [EVar (show bId)])) bufferList
       retStmt = SReturn (Just (EInt 0))
@@ -317,7 +323,7 @@ makeMultiCoreMain context cores bufferList delayBufferList constructors target n
 -- | Translates a ForSyDe IR `IRSystem` into a Procedural IR `Program` (legacy single-core entry point).
 translateIRSystemToProgram :: DynFlags -> [IRId] -> [(IRId, Int)] -> [(IRId, IRId)] -> [(IRId, IRSignal)] -> InputType -> Runs -> IRSystem -> Program
 translateIRSystemToProgram dflags scheduleList bufferList delayBufferList lookupSignalList input r (IRSystem (inputList, outputList) constructors _signalList functionList) =
-  let initialContext = initialTranslationContext dflags input r lookupSignalList bufferList inputList outputList delayBufferList
+  let initialContext = initialTranslationContext dflags input r False lookupSignalList bufferList inputList outputList delayBufferList
       context1 = foldl' translateIRConstructor initialContext constructors
       context2 = foldl' (translateBuffer []) context1 bufferList
       context3 = foldl' (translateIRFunctionToGlobals constructors) context2 functionList
@@ -375,10 +381,10 @@ translateContextToMain context scheduleList =
           ++ reverse (initBuffers context)
           ++ reverse (ioTokens context)
           ++ reverse (initDelay context)
-      benchStart = SExpr (ECall "BENCH_START" [])
-      benchEnd = SExpr (ECall "BENCH_END" [])
+      benchStartStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_START" [])] else []
+      benchEndStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_END" [])] else []
       mainFreeStmts = reverse (freeBuffers context) ++ [SReturn (Just (EInt 0))]
-      mainBody = SScope (mainInitStmts ++ [benchStart, whileStmt, benchEnd] ++ mainFreeStmts)
+      mainBody = SScope (mainInitStmts ++ benchStartStmts ++ [whileStmt] ++ benchEndStmts ++ mainFreeStmts)
    in GFuncDef Nothing TInt "main" [] mainBody
 
 -- | Returns a list of statements corresponding to actor function calls based

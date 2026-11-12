@@ -123,6 +123,7 @@ run args = do
     OutputC -> do
       let isMultiCore = length (schedCores schedule) > 1
       let effectiveInputType = if isMultiCore then Predefined else inputType
+      let isBench = benchmark args
       when (isMultiCore || effectiveInputType == Predefined) $ do
         let targetDir = case output_file of
               OutputFile (path, _) -> takeDirectory path
@@ -131,11 +132,12 @@ run args = do
         headerExists <- doesFileExist inputHeaderPath
         unless headerExists $
           writeFile inputHeaderPath (generateInputHeader forsydeIR schedule)
-      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r forsydeIR
+      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r isBench forsydeIR
       let c = translateProgram proceduralIR t effectiveInputType True
       write_output output_file OutputC c
 
     OutputCMC -> do
+      let isBench = benchmark args
       let targetDir = case output_file of
             OutputFile (path, _) -> takeDirectory path
             StdOut -> "."
@@ -143,7 +145,7 @@ run args = do
       headerExists <- doesFileExist inputHeaderPath
       unless headerExists $
         writeFile inputHeaderPath (generateInputHeader forsydeIR schedule)
-      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t Predefined r forsydeIR
+      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t Predefined r isBench forsydeIR
       let c = translateProgram proceduralIR t Predefined True
       write_output output_file OutputCMC c
 

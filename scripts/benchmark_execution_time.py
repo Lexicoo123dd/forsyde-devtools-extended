@@ -200,6 +200,7 @@ def benchmark_model(
         str(model_path),
         "--scheduleStrategy", "greedy",
         "--input-type", "predefined",
+        "--benchmark",
         "-o", str(seq_c),
     ], cwd=repo_root)
 
@@ -238,6 +239,7 @@ def benchmark_model(
             str(model_path),
             "--scheduleStrategy", "hu-level",
             "-c", str(cores),
+            "--benchmark",
             "-o", str(mc_c),
         ], cwd=repo_root)
 
