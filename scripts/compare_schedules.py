@@ -69,7 +69,7 @@ def run_cmd(cmd, cwd=None, timeout=60):
 
 def setup_includes(target_dir: Path, repo_root: Path):
     """Set up the include directory symlink in target_dir."""
-    include_src = repo_root / "examples" / "implementation" / "platform_independent" / "include"
+    include_src = repo_root / "include"
     include_link = target_dir / "include"
     if include_link.is_symlink() or include_link.exists():
         include_link.unlink()
@@ -135,7 +135,7 @@ def test_model(model_path: Path, output_base: Path, repo_root: Path, cores: int 
 
     # 1. Setup includes
     setup_includes(target_dir, repo_root)
-    include_inc = repo_root / "examples" / "implementation" / "platform_independent"
+    include_inc = repo_root
 
     # 2. Generate Sequential C Code
     seq_c = target_dir / "seq.c"

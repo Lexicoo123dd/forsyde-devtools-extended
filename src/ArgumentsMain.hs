@@ -16,6 +16,7 @@ data Output
 data HasExtension
   = WithFileExtension
   | NoFileExtension
+  deriving (Show, Eq)
 
 -- Stubbed out this type for now, will probably not implement
 -- reading separate input formats
