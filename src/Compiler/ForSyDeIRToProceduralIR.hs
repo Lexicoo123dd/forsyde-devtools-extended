@@ -293,12 +293,16 @@ makeMultiCoreMain context cores bufferList delayBufferList constructors target n
                         EVar "NULL"
                       ]
                   )
+              benchStart = SExpr (ECall "BENCH_START" [])
               runCore0 = SExpr (ECall "run_core_0" [EVar "NULL"])
               joinThread c = SExpr (ECall "pthread_join" [EVar ("thread_" ++ show c), EVar "NULL"])
+              benchEnd = SExpr (ECall "BENCH_END" [])
            in map threadDecl otherCores
+                ++ [benchStart]
                 ++ map createThread otherCores
                 ++ [runCore0]
                 ++ map joinThread otherCores
+                ++ [benchEnd]
         PICO2 ->
           let launchCore1 = SExpr (ECall "multicore_launch_core1" [EVar "run_core_1"])
               runCore0 = SExpr (ECall "run_core_0" [])
@@ -371,8 +375,10 @@ translateContextToMain context scheduleList =
           ++ reverse (initBuffers context)
           ++ reverse (ioTokens context)
           ++ reverse (initDelay context)
+      benchStart = SExpr (ECall "BENCH_START" [])
+      benchEnd = SExpr (ECall "BENCH_END" [])
       mainFreeStmts = reverse (freeBuffers context) ++ [SReturn (Just (EInt 0))]
-      mainBody = SScope (mainInitStmts ++ [whileStmt] ++ mainFreeStmts)
+      mainBody = SScope (mainInitStmts ++ [benchStart, whileStmt, benchEnd] ++ mainFreeStmts)
    in GFuncDef Nothing TInt "main" [] mainBody
 
 -- | Returns a list of statements corresponding to actor function calls based
