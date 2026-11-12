@@ -1,7 +1,7 @@
 module Compiler.ForSyDeIO where
 
 import Compiler.ForSyDeIR
-import Data.List (find, intercalate, isPrefixOf)
+import Data.List (find, intercalate)
 import Data.Maybe (mapMaybe)
 import Text.Printf (printf)
 
@@ -12,27 +12,34 @@ prettySignalField signal signals useTargetRate indent =
     (show signal)
     (if useTargetRate then targetRate else sourceRate)
   where
+    -- Finds the signal among all signal IRs to extract its source and target rate
+    -- Don't think a missing signal should be possible, so it throws an error
     IRSignal _ (_, sourceRate) (_, targetRate) =
-      head (filter (\(IRSignal signalId _ _) -> signalId == signal) signals)
+      case find (\(IRSignal signalId _ _) -> signalId == signal) signals of
+        Just s -> s
+        Nothing -> error ("Signal not found: " ++ show signal)
 
 prettyProCon :: [IRId] -> [IRSignal] -> Bool -> String -> String
 prettyProCon signalIds signalIRs isProducer indent =
   printf "%s\"%s\": {\n\
           \%s\n\
-          \%s}"
+          \%s}%s"
     indent
     text
     (intercalate "\n" (map (\s -> prettySignalField s signalIRs useTargetRate indent2) signalIds))
     indent
+    endText
   where
     text = if isProducer then "production" else "consumption"
     useTargetRate = if isProducer then False else True
+    endText = if isProducer then "" else ","
     indent2 = "  " ++ indent
 
 prettyConstructor :: IRConstructor -> [IRSignal] -> String -> Maybe String
 prettyConstructor (IRActor actorId _type _functionId (inputSignals, outputSignals)) signals indent =
+prettyConstructor (IRDelay _ _ (_, _)) _ _ = Nothing
   Just $ printf "%svertex \"%s\"\n\
-                 \%s[moc::sdf::SDFActor]\n\
+                 \%s[moc::sdf::SDFActor, visualization::Visualizable]\n\
                  \%s(combFunctions, %s, %s)\n\
                  \%s{\n\
                  \%s\n\
@@ -48,19 +55,11 @@ prettyConstructor (IRActor actorId _type _functionId (inputSignals, outputSignal
     (prettyProCon inputSignals signals False ("  " ++ indent))
     (prettyProCon outputSignals signals True ("  " ++ indent))
     indent
-prettyConstructor (IRDelay _ _ (_, _)) _ _ = Nothing
 
--- Input and output signals should not be part of the signal vertices in ForSyDeIO
-prettySignal :: IRSignal -> [IRConstructor] -> String -> Maybe String
-prettySignal (IRSignal signalId _ _) constructors indent
-  -- Skips printing input and output signals
-  | any (`isPrefixOf` signalIdText) ["s_in", "s_out"] = Nothing
-  -- Avoids printing double signals for signals with delays,
-  -- ie skips printing signals matching the output of a delay
-  | any matchesOutput constructors = Nothing
-  | otherwise =
-    Just $ printf "%svertex \"%s_sig\"\n\
-                   \%s[moc::sdf::SDFChannel]\n\
+prettySignal :: IRId -> [IRConstructor] -> String -> String
+prettySignal signalId constructors indent =
+    printf "%svertex \"%s_sig\"\n\
+                   \%s[moc::sdf::SDFChannel, visualization::Visualizable]\n\
                    \%s(producer, consumer, initialTokenValues)\n\
                    \%s{\n\
                    \%s\"numOfInitialTokens\": %d_i\n\
@@ -75,9 +74,6 @@ prettySignal (IRSignal signalId _ _) constructors indent
       indent
   where
     signalIdText = show signalId
-    matchesOutput (IRDelay _ _ (_, outputSignal)) =
-      outputSignal == signalId
-    matchesOutput _ = False
     -- A signal has a delay if there exists an IRDelay constructor with the signal as an input
     -- That IRDelay has a list of those delays ("tokens")
     delayCount = case find matches constructors of
@@ -87,12 +83,58 @@ prettySignal (IRSignal signalId _ _) constructors indent
     matches _ = False
     indent2 = "  " ++ indent
 
+prettyActorEdge :: IRId -> IRId -> [IRId] -> String -> Maybe String
+prettyActorEdge actorId outputSignalId globalOutputs indent
+  -- Skip creating edges to global outputs
+  | any (==outputSignalId) globalOutputs = Nothing
+  | otherwise =
+    Just $ printf "%sedge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from \"%s\" port \"%s\" to \"%s\" port \"producer\""
+      indent
+      (show actorId)
+      (show outputSignalId)
+      (show outputSignalId ++ "_sig")
+
+prettySignalEdge :: IRId -> IRId -> String -> String
+prettySignalEdge signalId outputActorId indent =
+    printf "%sedge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from \"%s\" port \"consumer\" to \"%s\" port \"%s\""
+      indent
+      (show signalId ++ "_sig")
+      (show outputActorId)
+      (show signalId)
+
 prettyIOGlobal :: IRSystem -> String
-prettyIOGlobal (IRSystem (_globalinputs, _globaloutputs) constructors signals _functions) =
+prettyIOGlobal (IRSystem (globalInputs, globalOutputs) constructors signals _functions) =
   let indent = "  " in
   printf "systemgraph {\n\
           \%s\n\n\
+          \%s\n\n\
+          \%s\n\
           \%s\n\
           \}"
-    (intercalate "\n" (mapMaybe (\c -> prettyConstructor c signals indent) constructors)) 
-    (intercalate "\n" (mapMaybe (\s -> prettySignal s constructors indent) signals)) 
+    (intercalate "\n" $ mapMaybe (\c -> prettyConstructor c signals indent) constructors)
+    (intercalate "\n" $ map (\(s, _) -> prettySignal s constructors indent) signalEdges)
+    (intercalate "\n" $ mapMaybe (\(c, s) -> prettyActorEdge c s globalOutputs indent) actorEdges)
+    (intercalate "\n" $ map (\(s, t) -> prettySignalEdge s t indent) signalEdges)
+  where
+    signalEdges = mapMaybe getSignalEdges signals
+    actorEdges = concatMap getActorEdges constructors
+    -- Should exist an edge for every output signal in every actor
+    getActorEdges :: IRConstructor -> [(IRId, IRId)]
+    -- Returns an entry for every outputSignal in the actors
+    getActorEdges (IRActor actorId _ _ (_, outputSignals)) =
+      map (\s -> (actorId, s)) outputSignals
+    -- Filters out delays
+    getActorEdges (IRDelay _ _ (_, _)) = []
+    -- Input and output signals should not be part of the signal vertices in ForSyDeIO
+    getSignalEdges :: IRSignal -> Maybe (IRId, IRId)
+    getSignalEdges (IRSignal signalId _ (targetId, _))
+      -- Skips input and output signals
+      | any (==signalId) globalInputs = Nothing
+      | any (==signalId) globalOutputs = Nothing
+      -- Avoids printing double signals for signals with delays,
+      -- ie skips printing signals matching the output of a delay
+      | any (\c -> case c of
+          IRDelay _ _ (_, outputSignal) -> outputSignal == signalId
+          IRActor _ _ _ _ -> False
+        ) constructors = Nothing
+      | otherwise = Just (signalId, targetId)
