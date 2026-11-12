@@ -71,7 +71,7 @@ def run_cmd(cmd, cwd=None, timeout=120):
 
 def setup_includes(target_dir: Path, repo_root: Path):
     """Set up the include directory symlink in target_dir."""
-    include_src = repo_root / "examples" / "implementation" / "platform_independent" / "include"
+    include_src = repo_root / "include"
     include_link = target_dir / "include"
     if include_link.is_symlink() or include_link.exists():
         include_link.unlink()
@@ -121,7 +121,8 @@ def parse_schedule_metrics(model_path: Path, repo_root: Path, cores: int) -> dic
         str(model_path),
         "--scheduleStrategy", "hu-level",
         "-c", str(cores),
-        "-s",
+        "--schedule-mc",
+        "--stdout",
     ], cwd=repo_root)
 
     out = res.stdout
@@ -191,7 +192,7 @@ def benchmark_model(
     target_dir = output_base / model_stem
     target_dir.mkdir(parents=True, exist_ok=True)
     setup_includes(target_dir, repo_root)
-    include_inc = repo_root / "examples" / "implementation" / "platform_independent"
+    include_inc = repo_root
 
     # 1. Generate Sequential (Single-Core) C Code
     seq_c = target_dir / "seq.c"
