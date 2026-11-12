@@ -26,7 +26,7 @@ prettyProCon signalIds signalIRs isProducer indent =
           \%s}%s"
     indent
     text
-    (intercalate "\n" (map (\s -> prettySignalField s signalIRs useTargetRate indent2) signalIds))
+    (intercalate ",\n" (map (\s -> prettySignalField s signalIRs useTargetRate indent2) signalIds))
     indent
     endText
   where
@@ -36,8 +36,8 @@ prettyProCon signalIds signalIRs isProducer indent =
     indent2 = "  " ++ indent
 
 prettyConstructor :: IRConstructor -> [IRSignal] -> String -> Maybe String
-prettyConstructor (IRActor actorId _type _functionId (inputSignals, outputSignals)) signals indent =
 prettyConstructor (IRDelay _ _ (_, _)) _ _ = Nothing
+prettyConstructor (IRActor actorId _type _functionId (inputSignals, outputSignals)) signals indent =
   Just $ printf "%svertex \"%s\"\n\
                  \%s[moc::sdf::SDFActor, visualization::Visualizable]\n\
                  \%s(combFunctions, %s, %s)\n\
@@ -94,13 +94,13 @@ prettyActorEdge actorId outputSignalId globalOutputs indent
       (show outputSignalId)
       (show outputSignalId ++ "_sig")
 
-prettySignalEdge :: IRId -> IRId -> String -> String
-prettySignalEdge signalId outputActorId indent =
+prettySignalEdge :: IRId -> IRId -> IRId -> String -> String
+prettySignalEdge signalId outputActorId outputPort indent =
     printf "%sedge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from \"%s\" port \"consumer\" to \"%s\" port \"%s\""
       indent
       (show signalId ++ "_sig")
       (show outputActorId)
-      (show signalId)
+      (show outputPort)
 
 prettyIOGlobal :: IRSystem -> String
 prettyIOGlobal (IRSystem (globalInputs, globalOutputs) constructors signals _functions) =
@@ -114,7 +114,7 @@ prettyIOGlobal (IRSystem (globalInputs, globalOutputs) constructors signals _fun
     (intercalate "\n" $ mapMaybe (\c -> prettyConstructor c signals indent) constructors)
     (intercalate "\n" $ map (\(s, _) -> prettySignal s constructors indent) signalEdges)
     (intercalate "\n" $ mapMaybe (\(c, s) -> prettyActorEdge c s globalOutputs indent) actorEdges)
-    (intercalate "\n" $ map (\(s, t) -> prettySignalEdge s t indent) signalEdges)
+    (intercalate "\n" $ map (\(s, (t, p)) -> prettySignalEdge s t p indent) signalEdges)
   where
     signalEdges = mapMaybe getSignalEdges signals
     actorEdges = concatMap getActorEdges constructors
@@ -126,7 +126,7 @@ prettyIOGlobal (IRSystem (globalInputs, globalOutputs) constructors signals _fun
     -- Filters out delays
     getActorEdges (IRDelay _ _ (_, _)) = []
     -- Input and output signals should not be part of the signal vertices in ForSyDeIO
-    getSignalEdges :: IRSignal -> Maybe (IRId, IRId)
+    getSignalEdges :: IRSignal -> Maybe (IRId, (IRId, IRId))
     getSignalEdges (IRSignal signalId _ (targetId, _))
       -- Skips input and output signals
       | any (==signalId) globalInputs = Nothing
@@ -137,4 +137,19 @@ prettyIOGlobal (IRSystem (globalInputs, globalOutputs) constructors signals _fun
           IRDelay _ _ (_, outputSignal) -> outputSignal == signalId
           IRActor _ _ _ _ -> False
         ) constructors = Nothing
-      | otherwise = Just (signalId, targetId)
+      -- If there is a delay, the target of the signal will be the delay actor instead of the next real actor.
+      -- Solution: Find if the target is a delay and if it is, extract its output signal.
+      -- Find the signal that matches that output signal, and extract its next target id instead.
+      -- If it is a delay, we also need to use the delay's output signal's id as the target port name
+      | otherwise = Just (signalId, resolveTarget targetId)
+      where
+        resolveTarget target =
+          case find isTargetDelay constructors of
+            Just (IRDelay _ _ (_, outputSignal)) ->
+              case find (\(IRSignal sid _ _) -> sid == outputSignal) signals of
+                Just (IRSignal _ _ (nextTarget, _)) -> (nextTarget, outputSignal)
+                Nothing -> (target, signalId)
+            _ -> (target, signalId)
+          where
+            isTargetDelay (IRDelay delayId _ _) = delayId == target
+            isTargetDelay _ = False
