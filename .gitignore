@@ -47,3 +47,18 @@ result-*
 tmp/
 test_runs/
 examples/implementation/platform_independent/test/
+MCPOC_TESTING/
+benchmark_results.json
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Editors
+.obsidian/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json

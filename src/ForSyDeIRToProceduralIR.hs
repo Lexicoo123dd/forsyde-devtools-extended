@@ -3,7 +3,6 @@ module ForSyDeIRToProceduralIR
     determineBufferKind,
     generateInputHeader,
     translateScheduleToProgram,
-    translateIRSystemToProgram,
   )
 where
 
@@ -320,15 +319,7 @@ makeMultiCoreMain context cores bufferList delayBufferList constructors target n
       mainBody = SScope ([initStmt] ++ allocStmts ++ delayStmts ++ threadStmts ++ freeStmts ++ [retStmt])
    in GFuncDef Nothing TInt "main" [] mainBody
 
--- | Translates a ForSyDe IR `IRSystem` into a Procedural IR `Program` (legacy single-core entry point).
-translateIRSystemToProgram :: DynFlags -> [IRId] -> [(IRId, Int)] -> [(IRId, IRId)] -> [(IRId, IRSignal)] -> InputType -> Runs -> IRSystem -> Program
-translateIRSystemToProgram dflags scheduleList bufferList delayBufferList lookupSignalList input r (IRSystem (inputList, outputList) constructors _signalList functionList) =
-  let initialContext = initialTranslationContext dflags input r False lookupSignalList bufferList inputList outputList delayBufferList
-      context1 = foldl' translateIRConstructor initialContext constructors
-      context2 = foldl' (translateBuffer []) context1 bufferList
-      context3 = foldl' (translateIRFunctionToGlobals constructors) context2 functionList
-      main = translateContextToMain context3 scheduleList
-   in Prog (reverse (initFunctions context3) ++ [main] ++ reverse (functions context3))
+
 
 -- | Translates the `TranslationContext` and Schedule into a main function.
 translateContextToMain :: TranslationContext -> [IRId] -> Global

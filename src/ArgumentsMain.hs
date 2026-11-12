@@ -29,13 +29,11 @@ data InputFormat
 
 data OutputFormat
   = OutputC
-  | OutputCMC
   | OutputCore
   | OutputForSyDeIR
   | OutputForSyDeIRJSON
   | OutputProceduralIR
   | OutputSchedule
-  | OutputScheduleMC
   deriving (Show, Eq)
 
 data Target
@@ -157,24 +155,12 @@ inputFormatProceduralIR =
 -- need to be active.
 outputFormatTop :: Parser OutputFormat
 outputFormatTop =
-  outputFormatScheduleMC
-    <|> outputFormatCMCPOC
+  outputFormatSchedule
     <|> outputFormatCore
     <|> outputFormatForSyDeIR
     <|> outputFormatForSyDeIRJSON
     <|> outputFormatProceduralIR
-    <|> outputFormatSchedule
     <|> outputFormatC
-
-outputFormatScheduleMC :: Parser OutputFormat
-outputFormatScheduleMC =
-  flag'
-    OutputScheduleMC
-    ( long "output-schedule-mc"
-        <> long "schedule-mc"
-        <> long "output-mc-schedule"
-        <> help "Output the multi-core SDF schedule per core to file instead of code"
-    )
 
 outputFormatC :: Parser OutputFormat
 outputFormatC =
@@ -182,15 +168,8 @@ outputFormatC =
     OutputC
     OutputC
     ( long "output-c"
-        <> help "Output file in C (default)"
-    )
-
-outputFormatCMCPOC :: Parser OutputFormat
-outputFormatCMCPOC =
-  flag'
-    OutputCMC
-    ( long "output-c-mc"
-        <> help "Output file in C multi-core"
+        <> long "output-c-mc"
+        <> help "Output file in C (default, handles both single-core and multi-core)"
     )
 
 outputFormatCore :: Parser OutputFormat
@@ -230,7 +209,11 @@ outputFormatSchedule =
   flag'
     OutputSchedule
     ( long "output-schedule"
-        <> help "Output the SDF schedule to file instead of code"
+        <> long "schedule"
+        <> long "output-schedule-mc"
+        <> long "schedule-mc"
+        <> long "output-mc-schedule"
+        <> help "Output the SDF schedule to file or stdout instead of code"
     )
 
 targetName :: ReadM Target

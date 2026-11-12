@@ -9,7 +9,6 @@ import CoreIRToForSyDeIR (translateCoreProgram)
 import ForSyDeIR (prettyIRJSON, prettyIRSystem)
 import ForSyDeIRToProceduralIR
   ( generateInputHeader,
-    translateIRSystemToProgram,
     translateScheduleToProgram,
   )
 import Options.Applicative
@@ -19,7 +18,6 @@ import Schedule
   ( Schedule (..),
     generateSchedule,
     prettySchedule,
-    toFlatSchedule,
   )
 import System.Directory
   ( createDirectoryIfMissing,
@@ -88,13 +86,11 @@ write_output (OutputFile (output_file, NoFileExtension)) extension s =
 -- Function for generating default file names
 generateDefaultFileName :: FilePath -> OutputFormat -> FilePath
 generateDefaultFileName f OutputC = f ++ ".c"
-generateDefaultFileName f OutputCMC = f ++ ".c"
 generateDefaultFileName f OutputCore = f ++ ".hcr"
 generateDefaultFileName f OutputForSyDeIR = f ++ ".fir"
 generateDefaultFileName f OutputForSyDeIRJSON = f ++ ".json"
 generateDefaultFileName f OutputProceduralIR = f ++ ".pir"
 generateDefaultFileName f OutputSchedule = f ++ ".sched"
-generateDefaultFileName f OutputScheduleMC = f ++ ".sched"
 
 -- Main function for running after arguments have been returned from main.
 -- Need to pattern match based on the arguments used. They are matched on
@@ -135,9 +131,6 @@ run args = do
     OutputSchedule ->
       write_output output_file OutputSchedule (prettySchedule forsydeIR schedule)
 
-    OutputScheduleMC ->
-      write_output output_file OutputScheduleMC (prettySchedule forsydeIR schedule)
-
     OutputC -> do
       let isMultiCore = length (schedCores schedule) > 1
       let effectiveInputType = if isMultiCore then Predefined else inputType
@@ -160,25 +153,6 @@ run args = do
           let c = translateProgram proceduralIR t effectiveInputType True
           writeFile cFilePath c
 
-    OutputCMC -> do
-      let isBench = benchmark args
-      case output_file of
-        StdOut -> do
-          let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t Predefined r isBench forsydeIR
-          let c = translateProgram proceduralIR t Predefined True
-          putStr c
-        _ -> do
-          let (targetDir, cFilePath) = resolveCOutput input_file output_file
-          createDirectoryIfMissing True targetDir
-          let inputHeaderPath = targetDir </> "input.h"
-          headerExists <- doesFileExist inputHeaderPath
-          unless headerExists $
-            writeFile inputHeaderPath (generateInputHeader forsydeIR schedule)
-          setupIncludeSymlink targetDir
-          let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t Predefined r isBench forsydeIR
-          let c = translateProgram proceduralIR t Predefined True
-          writeFile cFilePath c
-
     OutputCore ->
       write_output output_file OutputCore (prettyCoreProgram dflags core)
 
@@ -189,8 +163,10 @@ run args = do
       write_output output_file OutputForSyDeIRJSON (prettyIRJSON forsydeIR)
 
     OutputProceduralIR -> do
-      let flatSchedule = toFlatSchedule schedule
-      let proceduralIR = translateIRSystemToProgram dflags flatSchedule (schedBufferSizes schedule) (schedDelayBuffers schedule) lookupSignals inputType r forsydeIR
+      let isMultiCore = length (schedCores schedule) > 1
+      let effectiveInputType = if isMultiCore then Predefined else inputType
+      let isBench = benchmark args
+      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r isBench forsydeIR
       write_output output_file OutputProceduralIR (prettyProgram proceduralIR)
 
 main :: IO ()
