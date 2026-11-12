@@ -30,5 +30,20 @@
     }
 #endif
 
+#ifdef BENCHMARK_TIMING
+#include <time.h>
+#include <stdio.h>
+static struct timespec _bench_start, _bench_end;
+#define BENCH_START() clock_gettime(CLOCK_MONOTONIC, &_bench_start)
+#define BENCH_END() do { \
+    clock_gettime(CLOCK_MONOTONIC, &_bench_end); \
+    double _elapsed = (_bench_end.tv_sec - _bench_start.tv_sec) + (_bench_end.tv_nsec - _bench_start.tv_nsec) * 1e-9; \
+    fprintf(stderr, "EXECUTION_TIME_SEC: %.9f\n", _elapsed); \
+} while(0)
+#else
+#define BENCH_START() ((void)0)
+#define BENCH_END() ((void)0)
+#endif
+
 #endif
 

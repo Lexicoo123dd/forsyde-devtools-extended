@@ -2,6 +2,21 @@
 #ifndef ACTOR_TEMPLATES_H
 #define ACTOR_TEMPLATES_H
 
+#ifndef SIMULATE_WORKLOAD
+#if defined(ACTOR_WORKLOAD) && ACTOR_WORKLOAD > 0
+static inline void simulate_workload(void) {
+    volatile double acc = 1.0;
+    for (int i = 0; i < ACTOR_WORKLOAD; i++) {
+        acc = acc * 1.00001 + 0.0001;
+    }
+    __asm__ __volatile__("" : "+r"(acc) :: "memory");
+}
+#define SIMULATE_WORKLOAD() simulate_workload()
+#else
+#define SIMULATE_WORKLOAD() ((void)0)
+#endif
+#endif
+
 static void actor11SDF(int consum, int prod,
                 buffer_t *ch_in, buffer_t *ch_out,
                 void (*f) (token *, token *))
@@ -13,6 +28,7 @@ static void actor11SDF(int consum, int prod,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output);
 
     for(i = 0; i < prod; i++) {
@@ -33,6 +49,7 @@ static void actor12SDF(int consum, int prod1, int prod2,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -57,6 +74,7 @@ static void actor13SDF(int consum, int prod1, int prod2, int prod3,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -89,6 +107,7 @@ static void actor14SDF(int consum, int prod1, int prod2, int prod3, int prod4,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
@@ -125,6 +144,7 @@ static void actor21SDF(int consum1, int consum2, int prod,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output);
 
     for(i = 0; i < prod; i++) {
@@ -148,6 +168,7 @@ static void actor22SDF(int consum1, int consum2, int prod1, int prod2,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -177,6 +198,7 @@ static void actor23SDF(int consum1, int consum2, int prod1, int prod2,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -211,6 +233,7 @@ static void actor24SDF(int consum1, int consum2, int prod1, int prod2,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
@@ -250,6 +273,7 @@ static void actor31SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1);
 
     for(i = 0; i < prod1; i++) {
@@ -279,6 +303,7 @@ static void actor32SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -313,6 +338,7 @@ static void actor33SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -352,6 +378,7 @@ static void actor34SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
@@ -397,6 +424,7 @@ static void actor41SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1);
 
     for(i = 0; i < prod1; i++) {
@@ -431,6 +459,7 @@ static void actor42SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -470,6 +499,7 @@ static void actor43SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -514,6 +544,7 @@ static void actor44SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
