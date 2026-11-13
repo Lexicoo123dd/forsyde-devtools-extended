@@ -1,74 +1,233 @@
+{- |
+Module      : Schedule.Common
+Description : Shared data types, graph primitives, topology matrix mathematics,
+              and buffer simulation utilities common to all SDF scheduling strategies.
+-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
-module Compiler.Scheduler.SDFSchedule
-  ( Actor (..),
+module Schedule.Common
+  ( -- * Core Data Types
+    Actor (..),
     Edge (..),
+    ActorInstance,
+    SchedulingStrategy (..),
+    Schedule (Schedule, ..),
+    ScheduleMetrics (..),
+    SDFAnalysis (..),
+
+    -- * Schedule Utilities
+    toFlatSchedule,
+    tagInstances,
+
+    -- * Graph Primitives
+    incomingEdgeIndices,
+    outgoingEdgeIndices,
+    updateAt,
+    fireOnce,
     convertIRSystem,
+
+    -- * Topology Matrix & Nullspace Analysis
     buildTopologyMatrixEdgesRows,
-    matrixEdgesRowsToString,
+    rowReduce,
     matrixRank,
     nullspaceBasis,
     nullspaceVectorToString,
     toMinimalIntegers,
     multiplyMatrixVector,
-    greedySchedule,
+    matrixEdgesRowsToString,
+    analyzeSDF,
+
+    -- * Buffer Simulation & Sizing
     simulateBufferUsage,
     computeIOBufferSizes,
     getBuffers,
-    verifySchedule,
   )
 where
 
-import Compiler.ForSyDeIR
-import Data.Ratio (denominator, numerator)
-import Data.List (elemIndex, find, intercalate, nub, sortBy)
-import Data.Ord (comparing)
-import qualified Data.Vector as V
+import Data.List (elemIndex, find, mapAccumL, nub)
 import qualified Data.Map.Strict as Map
+import Data.Ratio (denominator, numerator)
+import ForSyDeIR
 import GHC.Generics (Generic)
-  
-import APGSchedule
-  ( Actor (..),
-    Edge (..),
-    fireOnce,
-    incomingEdgeIndices,
-    outgoingEdgeIndices,
-    updateAt,
-  )
 
--- | Convert ForSyDe IR to SDF data structures
+--------------------------------------------------------------------------------
+-- 1. Core Data Types
+--------------------------------------------------------------------------------
+
+-- | Represents an SDF actor in the graph.
+data Actor = Actor
+  { name :: IRId,
+    isInput :: Bool
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Represents a directed edge (FIFO channel) between two actors.
+data Edge = Edge
+  { edgeName :: IRId,
+    src :: Actor,
+    dst :: Actor,
+    prod :: Int,
+    cons :: Int,
+    isDelay :: Bool,
+    initTokens :: Int, -- Count of initial tokens for delay edges
+    buffers :: Maybe [(IRId, IRId)]
+  }
+  deriving (Show, Eq, Generic)
+
+-- | Represents an individual actor firing instance: (ActorId, 1-based instance index).
+type ActorInstance = (IRId, Int)
+
+-- | Performance and scheduling metrics.
+data ScheduleMetrics = ScheduleMetrics
+  { totalWork :: Int,
+    criticalPath :: Int,
+    makespan :: Int,
+    actualSpeedup :: Double,
+    theoreticalSpeedup :: Double
+  }
+  deriving (Show, Eq)
+
+-- | Available scheduling strategies.
+data SchedulingStrategy
+  = Greedy
+  | HuLevel Int -- ^ Number of target cores
+  deriving (Show, Eq)
+
+-- | The unified Schedule representation.
+--   'schedCores' is a 2D matrix (list of lists):
+--     - In single-core, schedCores has 1 row: [[inst1, inst2, ...]]
+--     - In multi-core, schedCores has P rows: [[core0_firings], [core1_firings], ...]
+data Schedule = ScheduleRecord
+  { schedStrategy :: SchedulingStrategy,
+    schedCores :: [[ActorInstance]],
+    schedBufferSizes :: [(IRId, Int)],
+    schedDelayBuffers :: [(IRId, IRId)],
+    schedMetrics :: Maybe ScheduleMetrics
+  }
+  deriving (Show, Eq)
+
+-- | Pattern synonym providing backwards compatibility for legacy (scheduleList, buffers, delayBuffers) tuple.
+pattern Schedule :: ([IRId], [(IRId, Int)], [(IRId, IRId)]) -> Schedule
+pattern Schedule tuple <- (toLegacyTuple -> tuple)
+  where
+    Schedule (s, b, d) = fromLegacyTuple s b d
+
+toLegacyTuple :: Schedule -> ([IRId], [(IRId, Int)], [(IRId, IRId)])
+toLegacyTuple s = (toFlatSchedule s, schedBufferSizes s, schedDelayBuffers s)
+
+fromLegacyTuple :: [IRId] -> [(IRId, Int)] -> [(IRId, IRId)] -> Schedule
+fromLegacyTuple s b d =
+  ScheduleRecord
+    { schedStrategy = Greedy,
+      schedCores = [tagInstances s],
+      schedBufferSizes = b,
+      schedDelayBuffers = d,
+      schedMetrics = Nothing
+    }
+
+-- | Flattens the core matrix into a flat list of actor IDs.
+toFlatSchedule :: Schedule -> [IRId]
+toFlatSchedule = map fst . concat . schedCores
+
+-- | Tags each occurrence of an actor ID with a 1-based sequential instance counter.
+tagInstances :: [IRId] -> [ActorInstance]
+tagInstances = snd . mapAccumL assignCount Map.empty
+  where
+    assignCount counts actorId =
+      let count = Map.findWithDefault 0 actorId counts + 1
+       in (Map.insert actorId count counts, (actorId, count))
+
+-- | Unified analysis of an SDF system.
+data SDFAnalysis
+  = EmptyGraph
+      { saActors :: [Actor],
+        saEdges :: [Edge],
+        saIOBuffers :: [(IRId, Int)],
+        saAliases :: [(IRId, IRId)]
+      }
+  | AnalyzedSDF
+      { saActors :: [Actor],
+        saEdges :: [Edge],
+        saMatrix :: [[Integer]],
+        saBasisVec :: [Rational],
+        saRepInt :: [Integer],
+        saRepCounts :: [Int],
+        saRepsWithNames :: [(IRId, Int)],
+        saDelayBuffers :: [(IRId, IRId)],
+        saIOBuffers :: [(IRId, Int)],
+        saAliases :: [(IRId, IRId)]
+      }
+  deriving (Show, Eq)
+
+--------------------------------------------------------------------------------
+-- 2. Graph Primitives & IR Conversion
+--------------------------------------------------------------------------------
+
+-- | Get all indices of incoming edges for a given actor (where dst edge == actor).
+incomingEdgeIndices :: [Actor] -> [Edge] -> Int -> [Int]
+incomingEdgeIndices actors edges actorIndex =
+  [idx | (idx, edge) <- zip [0 ..] edges, dst edge == (actors !! actorIndex)]
+
+-- | Get all indices of outgoing edges for a given actor (where src edge == actor).
+outgoingEdgeIndices :: [Actor] -> [Edge] -> Int -> [Int]
+outgoingEdgeIndices actors edges actorIndex =
+  [idx | (idx, edge) <- zip [0 ..] edges, src edge == (actors !! actorIndex)]
+
+-- | Update the element at a given index with a modifier function.
+updateAt :: Int -> (a -> a) -> [a] -> [a]
+updateAt index func list =
+  case splitAt index list of
+    (before, element : after) -> before ++ func element : after
+    (_, []) -> error $ "updateAt: index " ++ show index ++ " out of bounds for list of length " ++ show (length list)
+
+-- | Simulate one firing of a given actor:
+--   1. Consume tokens on incoming edges according to each edge's consumption rate.
+--   2. Produce tokens on outgoing edges according to each edge's production rate.
+fireOnce :: [Actor] -> [Edge] -> Int -> [Int] -> [Int]
+fireOnce actors edges actorIndex tokens =
+  let incomingEdges = incomingEdgeIndices actors edges actorIndex
+      outgoingEdges = outgoingEdgeIndices actors edges actorIndex
+      tokensAfterConsume = foldl consume tokens incomingEdges
+      tokensAfterProduce = foldl produce tokensAfterConsume outgoingEdges
+   in tokensAfterProduce
+  where
+    consume currentTokens edgeIndex =
+      let consumption = cons (edges !! edgeIndex)
+       in updateAt edgeIndex (subtract consumption) currentTokens
+
+    produce currentTokens edgeIndex =
+      let production = prod (edges !! edgeIndex)
+       in updateAt edgeIndex (+ production) currentTokens
+
+-- | Convert ForSyDe IR to SDF data structures.
 convertIRSystem :: IRSystem -> Either String ([Actor], [Edge])
 convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
-  let -- 1. Delay node names (IRDelay has two parameters)
-      delayNames = [n | IRDelay n _ (_, _) <- constructors]
+  let delayNames = [n | IRDelay n _ (_, _) <- constructors]
 
-      -- 2. All actor names (excluding delays)
       allActorNames =
         [ n
         | IRActor n _ _ (_, _) <- constructors
         ]
 
-      -- 3. Actors that receive from inputs
       inputActorNames =
         [ dstId
         | IRSignal _ (srcId, _) (dstId, _) <- signals,
           srcId `elem` inputNames
         ]
 
-      -- 4. Build actor list
       baseActors =
         [ Actor n (n `elem` inputActorNames || n `elem` inputNames)
         | n <- nub allActorNames
         ]
 
-      -- 5. Find helper
       findActorByName n =
         case find (\a -> name a == n) baseActors of
           Just a -> pure a
           Nothing -> Left ("Actor not found: " ++ show n)
 
-      -- Non-delay, non-input/output signals
       normalSigs = filter f signals
         where
           f (IRSignal _ (srcId, _) (dstId, _)) =
@@ -99,21 +258,18 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
                 srcId == delayName
               ]
          in case (incoming, outgoing) of
-              -- input is a global system input -> ignore
               ([(inSignalId, _, _)], _) | inSignalId `elem` inputNames -> pure []
-              -- output is a global system output -> ignore
               (_, [(outSignalId, _, _)]) | outSignalId `elem` outputNames -> pure []
               ([(inSignalId, srcIn, prodIn)], [(outSignalId, dstOut, consOut)]) -> do
                 srcActor <- findActorByName srcIn
                 dstActor <- findActorByName dstOut
                 delayTokens <-
-                  foldl'
+                  foldl
                     getDelayToken
                     (Left $ "Delay node " ++ show delayName ++ " not found")
                     constructors
                 pure
                   [ Edge
-                      -- use the input signal id as the delay edge id
                       inSignalId
                       srcActor
                       dstActor
@@ -121,8 +277,6 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
                       consOut
                       True
                       (length delayTokens)
-                      -- allow the edge to be found by the output signal id as well.
-                      -- Note that we need the in->in as we only lookup the aliaes.
                       (Just [(inSignalId, inSignalId), (outSignalId, inSignalId)])
                   ]
               ([], _) ->
@@ -132,7 +286,6 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
               _ ->
                 Left $ "Delay node " ++ show delayName ++ " must have exactly one input and one output."
 
-      -- 8. Normalize self-loops: ensure prod == cons, otherwise error
       normalizeSelfLoop e@(Edge edgeNameValue srcActor dstActor prodRate consRate _ _ _)
         | name srcActor == name dstActor =
             if prodRate /= consRate
@@ -147,25 +300,18 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
                     ++ show prodRate
                     ++ ", cons="
                     ++ show consRate
-              else pure e -- prod == cons is valid
+              else pure e
         | otherwise = pure e
 
-  -- Folded delay edges (A -> delay -> B → becomes one edge)
-  delayEdges <- mconcat <$> (sequence $ map makeDelayEdge delayNames)
+  delayEdges <- mconcat <$> sequence (map makeDelayEdge delayNames)
   normalEdges <- sequence $ map makeNormalEdges normalSigs
   finalEdges <- sequence $ map normalizeSelfLoop (normalEdges ++ delayEdges)
   pure (baseActors, finalEdges)
 
-----------------------------------------------------------
--- Topology matrix and null space calculation
-----------------------------------------------------------
+--------------------------------------------------------------------------------
+-- 3. Topology Matrix & Nullspace Analysis
+--------------------------------------------------------------------------------
 
--- | Build the topology matrix, where rows are edges and columns are actors
---
--- Topo building logic:
--- - If actor is the source of the edge, the value is the production rate
--- - If actor is the destination of the edge, the value is the negative consumption rate
--- - Otherwise, the value is 0
 buildTopologyMatrixEdgesRows :: [Actor] -> [Edge] -> [[Integer]]
 buildTopologyMatrixEdgesRows actors edges =
   [[topo actor edge | actor <- actors] | edge <- edges]
@@ -176,8 +322,6 @@ buildTopologyMatrixEdgesRows actors edges =
       | dst edge == actor = -fromIntegral (cons edge)
       | otherwise = 0
 
--- | Reduced row echelon form via exact Gaussian elimination over the rationals.
--- Returns the reduced rows and the pivot column indices, in pivot order.
 rowReduce :: [[Rational]] -> ([[Rational]], [Int])
 rowReduce rowsIn = go rowsIn 0 []
   where
@@ -205,8 +349,6 @@ rowReduce rowsIn = go rowsIn 0 []
 matrixRank :: [[Integer]] -> Int
 matrixRank = length . snd . rowReduce . map (map fromInteger)
 
--- | Basis vectors of the null space of an integer matrix, as exact rationals.
--- One basis vector per free column of the reduced matrix.
 nullspaceBasis :: [[Integer]] -> [[Rational]]
 nullspaceBasis mat =
   let (rref, pivots) = rowReduce (map (map fromInteger) mat)
@@ -221,140 +363,98 @@ nullspaceBasis mat =
             Nothing -> 0
    in [[entry f c | c <- [0 .. nCols - 1]] | f <- freeCols]
 
--- | Scale an exact rational vector to the smallest integer vector pointing in
--- the same direction. An all-negative vector is flipped to positive.
 toMinimalIntegers :: [Rational] -> [Integer]
 toMinimalIntegers xs =
-  let commonDenom = foldl' lcm 1 (map denominator xs)
+  let commonDenom = foldl lcm 1 (map denominator xs)
       ints = [numerator x * (commonDenom `div` denominator x) | x <- xs]
-      gcdAll = foldl' gcd 0 ints
+      gcdAll = foldl gcd 0 ints
       reduced = if gcdAll == 0 then ints else map (`div` gcdAll) ints
    in if all (< 0) reduced then map negate reduced else reduced
 
 multiplyMatrixVector :: [[Integer]] -> [Integer] -> [Integer]
 multiplyMatrixVector mat vec = map (sum . zipWith (*) vec) mat
 
--- | Return the matrix as a string with edges as rows and actors as columns
 matrixEdgesRowsToString :: [Edge] -> [Actor] -> [[Integer]] -> String
 matrixEdgesRowsToString edges actors topoMatrix =
-  let -- Calculate the maximum width of each column
-      actorNameWidths = map (length . show . name) actors
+  let actorNameWidths = map (length . show . name) actors
       rowValueWidths = map (maximum . map (length . show)) topoMatrix
       colWidths = zipWith max actorNameWidths rowValueWidths
-      totalColWidths = map (+ 2) colWidths -- Add 2 to each column width for spacing
+      totalColWidths = map (+ 2) colWidths
+      edgeLabelWidth = maximum (map (length . show . edgeName) edges)
 
-      -- Calculate the maximum width of the edge labels
-      edgeLabelWidth = maximum (map (length . show . edgeLabel) edges)
-
-      -- Build the header
       header =
         pad (edgeLabelWidth + 2) "Edge\\Actor"
           ++ concatMap (\(actor, width) -> pad width (show $ name actor)) (zip actors totalColWidths)
 
-      -- Build the separator line
       totalWidth = edgeLabelWidth + 2 + sum totalColWidths
       separator = replicate totalWidth '-'
 
-      -- Build the matrix rows
       matrixRows = map (rowToString edgeLabelWidth totalColWidths) (zip edges topoMatrix)
-
-      -- Combine everything
-      result =
-        "Topology Matrix (Edges × Actors):\n"
-          ++ header
-          ++ "\n"
-          ++ separator
-          ++ "\n"
-          ++ unlines matrixRows
-   in result
+   in "Topology Matrix (Edges × Actors):\n"
+        ++ header
+        ++ "\n"
+        ++ separator
+        ++ "\n"
+        ++ unlines matrixRows
   where
     pad width str = take width (str ++ repeat ' ')
-    edgeLabel edge = edgeName edge
-
     rowToString labelWidth colWidths (edge, rowValues) =
-      pad (labelWidth + 2) (show $ edgeLabel edge)
+      pad (labelWidth + 2) (show $ edgeName edge)
         ++ concatMap
           (\(val, width) -> pad width (show val))
           (zip rowValues colWidths)
 
-----------------------------------------------------------
--- Scheduler: Greedy + Forced approach with special handling for inputs.
--- Actors marked as isInput=True have a infinite external tokens
--- To fire an actor, it must have enough input tokens for all its incoming edges.
-----------------------------------------------------------
+nullspaceVectorToString :: [Rational] -> String
+nullspaceVectorToString = unlines . map formatRational
+  where
+    formatRational x
+      | denominator x == 1 = show (numerator x)
+      | otherwise = show (numerator x) ++ "/" ++ show (denominator x)
 
+-- | Validates and analyzes an IRSystem, computing the topology matrix,
+-- rank, repetition vector, delay buffers, and I/O buffer requirements.
+analyzeSDF :: IRSystem -> Either String SDFAnalysis
+analyzeSDF irSystem = do
+  (actors, edges) <- convertIRSystem irSystem
+  if null edges
+    then do
+      let repsWithNames = zip (map name actors) (replicate (length actors) 1)
+      (ioBufSizes, aliases) <- computeIOBufferSizes irSystem repsWithNames
+      pure $ EmptyGraph actors edges ioBufSizes aliases
+    else do
+      let mat = buildTopologyMatrixEdgesRows actors edges
+          rankMat = matrixRank mat
+      if rankMat /= length actors - 1
+        then Left "Matrix rank is not equal to number of actors minus one. Cannot compute repetition vector."
+        else case nullspaceBasis mat of
+          [] -> Left "No repetition vector found: null space is empty."
+          (basisVec : _) -> do
+            let repInt = toMinimalIntegers basisVec
+                repCounts = map fromIntegral repInt :: [Int]
+                repsWithNames = zip (map name actors) repCounts
+                delayBuffers = getBuffers edges
+            (ioBufSizes, aliases) <- computeIOBufferSizes irSystem repsWithNames
+            pure $
+              AnalyzedSDF
+                { saActors = actors,
+                  saEdges = edges,
+                  saMatrix = mat,
+                  saBasisVec = basisVec,
+                  saRepInt = repInt,
+                  saRepCounts = repCounts,
+                  saRepsWithNames = repsWithNames,
+                  saDelayBuffers = delayBuffers,
+                  saIOBuffers = ioBufSizes,
+                  saAliases = aliases
+                }
 
-
--- | Greedy forced schedule algorithm
---
--- Parameters:
---   actors: list of actors
---   edges: list of edges
---   repetitionCounts: number of times each actor needs to be executed
--- Return: schedule sequence
---
--- Steps:
--- 1. Find all the fireable actors (repetition count > 0 and has enough input tokens)
--- 2. Fire all the fireable actors with the sequence order (could be optimized for minimal buffer size)
--- 3. If there is no fireable actor, force fire an remaining actor with delay edges check (to determine the initial token count)
--- 4. Record the minimum token value of each edge during the execution
--- 5. If there are negative minimum token values, it will be the required initial token count
-greedySchedule :: [Actor] -> [Edge] -> [Int] -> Either String [Int]
-greedySchedule actors edges repetitionCounts =
-  let nActors = length actors
-      initialTokens = map initTokens edges -- map initial tokens
-
-      -- Recursive worker function:
-      -- - remainingReps: remaining times
-      -- - currentTokens: current token state
-      -- - accSchedule: accumulated schedule sequence
-      worker :: [Int] -> [Int] -> [Int] -> Either String [Int]
-      worker remainingReps currentTokens accSchedule
-        | sum remainingReps == 0 = pure $ reverse accSchedule
-        | otherwise =
-            let isFireable i = do
-                  let incomingEdges = incomingEdgeIndices actors edges i -- has remaining fire repetitions
-                      actor = actors !! i
-                      canFire = case incomingEdges of
-                        [] ->
-                          if isInput actor
-                            then pure $ True -- If is input actor and no incoming edges from other actors
-                            else Left $ "Invalid graph: actor " ++ show (name actor) ++ " has no incoming edges but is not marked as input."
-                        _ ->
-                          Right $
-                            all
-                              ( \edgeIdx ->
-                                  -- All incoming edges must have enough tokens
-                                  currentTokens !! edgeIdx >= cons (edges !! edgeIdx)
-                              )
-                              incomingEdges
-                   in do
-                        firable <- canFire
-                        pure $ (i, firable && (remainingReps !! i) > 0)
-                -- fireableActors = [i | i <- [0 .. nActors - 1], isFireable i]
-                fireableActors = map fst <$> filter (\(_, v) -> v) <$> sequence (map isFireable [0 .. nActors - 1])
-             in case fireableActors of
-                  Right (actorIdx : _) ->
-                    -- If there is a fireable actor, fire the first one
-                    let newTokens = fireOnce actors edges actorIdx currentTokens
-                        newRemaining = updateAt actorIdx (subtract 1) remainingReps
-                     in worker newRemaining newTokens (actorIdx : accSchedule)
-                  Right [] -> Left "Error: Deadlock detected, cannot find fireable actor.\n"
-                  Left e -> Left e
-   in worker repetitionCounts initialTokens []
-
-----------------------------------------------------------
--- Simulation to compute buffer size per edge
--- After generating a valid schedule, simulate it once over one period
--- The buffer size of each edge is defined as the maximum token count observed
-----------------------------------------------------------
+--------------------------------------------------------------------------------
+-- 4. Buffer Sizing & Simulation
+--------------------------------------------------------------------------------
 
 simulateBufferUsage :: [Actor] -> [Edge] -> [Int] -> [Int] -> [(IRId, Int)]
 simulateBufferUsage actors edges initialTokens schedule =
-  let -- Get all edge names
-      edgeNames = map edgeName edges
-
-      -- Simulate one step：fire one actor, update token state and max buffer record
+  let edgeNames = map edgeName edges
       simulateStep (currentTokens, maxBuffer) actorIndex =
         let incomingEdges = incomingEdgeIndices actors edges actorIndex
             outgoingEdges = outgoingEdgeIndices actors edges actorIndex
@@ -362,13 +462,8 @@ simulateBufferUsage actors edges initialTokens schedule =
             tokensAfterProduce = foldl produce tokensAfterConsume outgoingEdges
             newMaxBuffer = zipWith max maxBuffer tokensAfterProduce
          in (tokensAfterProduce, newMaxBuffer)
-
-      -- Use foldl to simulate the whole schedule
       (_, finalMaxBuffer) = foldl simulateStep (initialTokens, initialTokens) schedule
-
-      -- Combine buffer sizes and names
-      bufferSizesWithNames = zip edgeNames finalMaxBuffer
-   in bufferSizesWithNames
+   in zip edgeNames finalMaxBuffer
   where
     consume tokens edgeIdx =
       let consumption = cons (edges !! edgeIdx)
@@ -379,8 +474,7 @@ simulateBufferUsage actors edges initialTokens schedule =
 
 computeIOBufferSizes :: IRSystem -> [(IRId, Int)] -> Either String ([(IRId, Int)], [(IRId, IRId)])
 computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWithNames =
-  let -- Find all external input edges
-      inputSignals = [s | s@(IRSignal _ (srcId, _) (_, _)) <- signals, srcId `elem` inputs]
+  let inputSignals = [s | s@(IRSignal _ (srcId, _) (_, _)) <- signals, srcId `elem` inputs]
       inputEdges = foldr f (Right []) $ map nonDelayInputSignal inputSignals
         where
           f el acc = do
@@ -392,12 +486,9 @@ computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWit
                 pure $ (signalId, dstRate, dstReps, aliases, nTokens) : a
               else acc
 
-      -- Find the first non-delay process connected to the input signal
       nonDelayInputSignal s@(IRSignal sigId (srcId, srcRate) (dstId, _)) =
         case find (\c -> constructorName c == dstId) constructors of
-          -- The signal directly connects to an actor
           Just (IRActor _ _ _ _) -> pure (s, [], 0)
-          -- The signal connects to a delay, keep going
           Just (IRDelay dName tokens (_, next)) | dstId == dName ->
             case find (\(IRSignal sId _ _) -> sId == next) signals of
               Just (IRSignal sigAlias (_, _) (newDstId, newDstRate)) -> do
@@ -406,7 +497,6 @@ computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWit
               Nothing -> Left $ "Could not find next signal " ++ show next
           _ -> Left $ "Could not find the process " ++ show srcId
 
-      -- Find all external output edges
       outputSignals = [s | s@(IRSignal _ (_, _) (dstId, _)) <- signals, dstId `elem` outputs]
       outputEdges = foldr f (Right []) $ map nonDelayOutputSignal outputSignals
         where
@@ -419,12 +509,9 @@ computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWit
                 pure $ (signalId, srcRate, srcReps, aliases, nTokens) : a
               else acc
 
-      -- Find the first non-delay process connected to the output signal
       nonDelayOutputSignal s@(IRSignal sigId (srcId, _) (dstId, dstRate)) =
         case find (\c -> constructorName c == srcId) constructors of
-          -- The signal directly connects to an actor
           Just (IRActor _ _ _ _) -> pure (s, [], 0)
-          -- The signal connects to a delay, keep going
           Just (IRDelay dName tokens (next, _)) | srcId == dName ->
             case find (\(IRSignal sId _ _) -> sId == next) signals of
               Just (IRSignal sigAlias (newSrcId, newSrcRate) (_, _)) -> do
@@ -437,48 +524,17 @@ computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWit
         IRActor cName _ _ _ -> cName
         IRDelay cName _ _ -> cName
 
-      -- Find repetition count by actor names
       findActorRep actorName =
         case lookup actorName repsWithNames of
           Just rep -> pure rep
           Nothing -> Left $ "Actor " ++ show actorName ++ " not found in repetition counts"
 
-      -- separate the buffers and aliases
       foldBuffer (sigId, rate, rep, aliases, nTokens) (sigAcc, aliasAcc) =
         ((sigId, max (rate * rep) nTokens) : sigAcc, aliases ++ aliasAcc)
    in do
         inEdges <- inputEdges
         outEdges <- outputEdges
         pure $ foldr foldBuffer ([], []) $ inEdges ++ outEdges
-
-----------------------------------------------------------
--- Verification of the schedule
-----------------------------------------------------------
-
-verifySchedule :: [Actor] -> [Edge] -> [Int] -> [Int] -> [Int] -> Bool
-verifySchedule actors edges initialTokens schedule _repetitionCounts =
-  let -- Recursively check the schedule
-      check :: [Int] -> [Int] -> Bool
-      check _ [] = True -- Base case: empty schedule is valid
-      check currentTokens (actorIndex : remainingSchedule) =
-        let incomingEdges = incomingEdgeIndices actors edges actorIndex
-
-            -- Simulate consumption and check if it is valid
-            tokensAfterConsume = foldl consume currentTokens incomingEdges
-            consumptionValid = all (>= 0) tokensAfterConsume
-
-            -- Simulate production
-            outgoingEdges = outgoingEdgeIndices actors edges actorIndex
-            tokensAfterProduce = foldl produce tokensAfterConsume outgoingEdges
-         in consumptionValid && check tokensAfterProduce remainingSchedule
-   in check initialTokens schedule
-  where
-    consume tokens edgeIdx =
-      let consumption = cons (edges !! edgeIdx)
-       in updateAt edgeIdx (subtract consumption) tokens
-    produce tokens edgeIdx =
-      let production = prod (edges !! edgeIdx)
-       in updateAt edgeIdx (+ production) tokens
 
 getBuffers :: [Edge] -> [(IRId, IRId)]
 getBuffers edges =
@@ -489,12 +545,3 @@ getBuffers edges =
           Nothing -> []
     )
     edges
-
--- Helper function to display the null space vector, one component per line
-nullspaceVectorToString :: [Rational] -> String
-nullspaceVectorToString = unlines . map formatRational
-  where
-    formatRational x
-      | denominator x == 1 = show (numerator x)
-      | otherwise = show (numerator x) ++ "/" ++ show (denominator x)
-

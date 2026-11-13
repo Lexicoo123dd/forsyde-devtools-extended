@@ -1,20 +1,17 @@
+{- |
+Module      : Schedule.HuLevel
+Description : Multi-core static list scheduler based on Acyclic Precedence Graphs (APG)
+              and Hu's level-based priority algorithm.
+-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 
-module APGSchedule
-  ( -- * Core Data Types
-    Actor (..),
-    Edge (..),
-    ActorInstance,
-    PrecedenceEdge,
+module Schedule.HuLevel
+  ( -- * Core APG Data Types
     ScheduledFiring (..),
+    ActiveTask (..),
     MultiCoreSchedule,
-
-    -- * Graph Helper Functions
-    incomingEdgeIndices,
-    outgoingEdgeIndices,
-    updateAt,
-    fireOnce,
+    PrecedenceEdge,
 
     -- * SDF to APG Construction
     dFunction,
@@ -26,43 +23,24 @@ module APGSchedule
     computeHuLevels,
     listSchedulingHuLevel,
     toPerCoreSchedule,
+
+    -- * Generator and Pretty-Printer
+    generateHuLevelSchedule,
+    prettyHuLevelSchedule,
   )
 where
 
-import Data.List (partition, sortBy)
+import Data.List (elemIndex, intercalate, partition, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Ord (comparing)
 import qualified Data.Vector as V
-import Compiler.ForSyDeIR (IRId)
+import ForSyDeIR (IRId, IRSystem)
 import GHC.Generics (Generic)
+import Schedule.Common
 
 --------------------------------------------------------------------------------
 -- 1. Core Data Types
 --------------------------------------------------------------------------------
-
--- | Represents an SDF actor in the graph.
-data Actor = Actor
-  { name :: IRId,
-    isInput :: Bool
-  }
-  deriving (Show, Eq, Generic)
-
--- | Represents a directed edge (FIFO channel) between two actors.
-data Edge = Edge
-  { edgeName :: IRId,
-    src :: Actor,
-    dst :: Actor,
-    prod :: Int,
-    cons :: Int,
-    isDelay :: Bool,
-    initTokens :: Int, -- Count of initial tokens for delay edges
-    buffers :: Maybe [(IRId, IRId)]
-  }
-  deriving (Show, Eq, Generic)
-
--- | Represents a specific invocation of an actor: (Actor ID, 1-based instance number).
---   Example: ("actor_a", 1) is the first firing of actor_a.
-type ActorInstance = (IRId, Int)
 
 -- | Represents a directed precedence dependency: (Producer Instance, Consumer Instance).
 --   Example: (("actor_a", 1), ("actor_b", 1)) means A^1 must finish before B^1 starts.
@@ -70,10 +48,10 @@ type PrecedenceEdge = (ActorInstance, ActorInstance)
 
 -- | Represents a scheduled execution of an actor firing on a specific core.
 data ScheduledFiring = ScheduledFiring
-  { sfCore      :: Int,            -- ^ 0-based Core ID (e.g. 0 for Core 0, 1 for Core 1)
-    sfInstance  :: ActorInstance,   -- ^ The specific firing (ActorId, IterationNumber)
-    sfStartTime :: Int,            -- ^ Start time (tick / cycle)
-    sfEndTime   :: Int             -- ^ Finish time (tick / cycle)
+  { sfCore :: Int,
+    sfInstance :: ActorInstance,
+    sfStartTime :: Int,
+    sfEndTime :: Int
   }
   deriving (Show, Eq, Generic)
 
@@ -83,55 +61,13 @@ type MultiCoreSchedule = Map.Map Int [ActorInstance]
 -- | Internal helper type to track tasks currently in flight on a processor.
 data ActiveTask = ActiveTask
   { atFinishTime :: Int,
-    atCore       :: Int,
-    atInstance   :: ActorInstance
+    atCore :: Int,
+    atInstance :: ActorInstance
   }
   deriving (Show, Eq)
 
 --------------------------------------------------------------------------------
--- 2. Graph Helper Functions
---------------------------------------------------------------------------------
-
--- | Get all indices of incoming edges for a given actor (where dst edge == actor).
-incomingEdgeIndices :: [Actor] -> [Edge] -> Int -> [Int]
-incomingEdgeIndices actors edges actorIndex =
-  [idx | (idx, edge) <- zip [0 ..] edges, dst edge == (actors !! actorIndex)]
-
--- | Get all indices of outgoing edges for a given actor (where src edge == actor).
-outgoingEdgeIndices :: [Actor] -> [Edge] -> Int -> [Int]
-outgoingEdgeIndices actors edges actorIndex =
-  [idx | (idx, edge) <- zip [0 ..] edges, src edge == (actors !! actorIndex)]
-
--- | Update the element at a given index with a modifier function.
-updateAt :: Int -> (a -> a) -> [a] -> [a]
-updateAt index func list =
-  case splitAt index list of
-    (before, element : after) -> before ++ func element : after
-    (_, []) -> error $ "updateAt: index " ++ show index ++ " out of bounds for list of length " ++ show (length list)
-
--- | Simulate one firing of a given actor:
---   1. Consume tokens on incoming edges according to each edge's consumption rate.
---   2. Produce tokens on outgoing edges according to each edge's production rate.
-fireOnce :: [Actor] -> [Edge] -> Int -> [Int] -> [Int]
-fireOnce actors edges actorIndex tokens =
-  let incomingEdges = incomingEdgeIndices actors edges actorIndex
-      outgoingEdges = outgoingEdgeIndices actors edges actorIndex
-      tokensAfterConsume = foldl' consume tokens incomingEdges
-      tokensAfterProduce = foldl' produce tokensAfterConsume outgoingEdges
-   in tokensAfterProduce
-  where
-    consume :: [Int] -> Int -> [Int]
-    consume currentTokens edgeIndex =
-      let consumption = cons (edges !! edgeIndex)
-       in updateAt edgeIndex (subtract consumption) currentTokens
-
-    produce :: [Int] -> Int -> [Int]
-    produce currentTokens edgeIndex =
-      let production = prod (edges !! edgeIndex)
-       in updateAt edgeIndex (+ production) currentTokens
-
---------------------------------------------------------------------------------
--- 3. SDF to APG Construction (Lee & Messerschmitt 1987)
+-- 2. SDF to APG Construction (Lee & Messerschmitt 1987)
 --------------------------------------------------------------------------------
 
 -- | Equation (7) from Lee & Messerschmitt (1987):
@@ -145,9 +81,7 @@ dFunction j consRate initToks prodRate
           (quotient, remainder) = num `divMod` prodRate
        in if remainder == 0 then quotient else quotient + 1
 
--- | Check if a specific actor (by index) is runnable in the current simulation state:
---   1. It has been fired fewer than targetReps[actorIdx] times.
---   2. All incoming buffers contain enough tokens for one firing.
+-- | Check if a specific actor (by index) is runnable in the current simulation state.
 isActorRunnable :: [Actor] -> [Edge] -> [Int] -> V.Vector Int -> [Int] -> Int -> Either String Bool
 isActorRunnable actors edges targetReps q currentBuffer actorIdx = do
   let currentRuns = q V.! actorIdx
@@ -168,8 +102,7 @@ isActorRunnable actors edges targetReps q currentBuffer actorIdx = do
             (\edgeIdx -> (currentBuffer !! edgeIdx) >= cons (edges !! edgeIdx))
             incomingEdges
 
--- | Constructs the Acyclic Precedence Graph (APG) for one period (or J periods).
---   Returns Either an error message (e.g. deadlock) or (APG Vertices, Precedence Edges).
+-- | Constructs the Acyclic Precedence Graph (APG) for one period.
 createAcyclicPresedenceGraph ::
   [Actor] ->
   [Edge] ->
@@ -177,18 +110,9 @@ createAcyclicPresedenceGraph ::
   [Int] ->
   Either String ([ActorInstance], [PrecedenceEdge])
 createAcyclicPresedenceGraph actors edges _matrix repCounts = do
-  let -- Initial buffer state b(0) from initial tokens (delays)
-      initBuffers :: [Int]
-      initBuffers = map initTokens edges
-
-      -- q(0) = 0 vector of size (number of actors)
-      q0 :: V.Vector Int
+  let initBuffers = map initTokens edges
       q0 = V.replicate (length actors) 0
-
-  -- Run the recursive Class S simulation loop
   (finalQ, instances, presEdges) <- helperAPG initBuffers q0 actors edges _matrix repCounts [] []
-
-  -- Check termination condition: did every actor run its required number of times?
   if V.toList finalQ == repCounts
     then Right (reverse instances, reverse presEdges)
     else Left "Error: Deadlock detected while constructing Acyclic Precedence Graph."
@@ -206,16 +130,13 @@ helperAPG ::
   Either String (V.Vector Int, [ActorInstance], [PrecedenceEdge])
 helperAPG currentBuffer q actors edges _matrix targetReps presActorInstances presEdges = do
   let actorIndices = [0 .. length actors - 1]
-
-  -- Check if ANY actor is runnable to decide whether the loop continues
   runnableFlags <- mapM (isActorRunnable actors edges targetReps q currentBuffer) actorIndices
 
   if not (or runnableFlags)
     then Right (q, presActorInstances, presEdges)
     else do
-      -- Fire runnable actors in index order
       (nextBuf, nextQ, nextInstances, nextEdges) <-
-        foldl'
+        foldl
           ( \accEither actorIdx -> do
               (bufAcc, qAcc, instAcc, edgeAcc) <- accEither
               canRun <- isActorRunnable actors edges targetReps qAcc bufAcc actorIdx
@@ -223,11 +144,8 @@ helperAPG currentBuffer q actors edges _matrix targetReps presActorInstances pre
                 then Right (bufAcc, qAcc, instAcc, edgeAcc)
                 else do
                   let actor = actors !! actorIdx
-                      -- Create the (q_\alpha(i) + 1)-th instance of actor \alpha
                       j = (qAcc V.! actorIdx) + 1
                       newInstance = (name actor, j)
-
-                      -- For each input edge 'a' on \alpha, establish precedence links
                       inEdgeIdxs = incomingEdgeIndices actors edges actorIdx
                       selfPrecedence = if j > 1 then [((name actor, j - 1), newInstance)] else []
                       newEdgesForAlpha =
@@ -241,13 +159,8 @@ helperAPG currentBuffer q actors edges _matrix targetReps presActorInstances pre
                                  in [((etaName, k), newInstance) | k <- [1 .. d]]
                             )
                             inEdgeIdxs
-
-                      -- Update buffer state: b(i+1) = b(i) + Gamma * v(i)
                       updatedBuf = fireOnce actors edges actorIdx bufAcc
-
-                      -- Update instance count vector q(i)
                       updatedQ = qAcc V.// [(actorIdx, j)]
-
                   Right
                     ( updatedBuf,
                       updatedQ,
@@ -257,119 +170,93 @@ helperAPG currentBuffer q actors edges _matrix targetReps presActorInstances pre
           )
           (Right (currentBuffer, q, presActorInstances, presEdges))
           actorIndices
-
-      -- Repeat simulation loop
       helperAPG nextBuf nextQ actors edges _matrix targetReps nextInstances nextEdges
 
 --------------------------------------------------------------------------------
--- 4. Hu-Level Calculation on the APG
+-- 3. Hu-Level Calculation on the APG
 --------------------------------------------------------------------------------
 
 -- | Computes the Hu-level (critical path length to a sink) for every instance in the APG.
---   Works for arbitrary DAGs, including disconnected components and multiple sinks.
 computeHuLevels ::
-  [ActorInstance] ->                       -- ^ APG Vertices (in topological order)
-  [PrecedenceEdge] ->                      -- ^ APG Directed Precedence Edges
-  (IRId -> Int) ->                         -- ^ Execution cost function for actors (use (\_ -> 1) for unit time)
-  Map.Map ActorInstance Int                -- ^ Map of (ActorInstance -> Hu-level)
+  [ActorInstance] ->
+  [PrecedenceEdge] ->
+  (IRId -> Int) ->
+  Map.Map ActorInstance Int
 computeHuLevels instances presEdges actorCost =
-  -- Fold over the topologically sorted instances in REVERSE order.
-  -- Reversing topological order guarantees all successors of a node
-  -- are processed BEFORE the node itself.
-  foldl' processNode Map.empty (reverse instances)
+  foldl processNode Map.empty (reverse instances)
   where
-    -- 1. Build the adjacency list: Producer -> [Consumers]
-    succMap :: Map.Map ActorInstance [ActorInstance]
     succMap =
-      foldl'
+      foldl
         (\acc (srcInst, dstInst) -> Map.insertWith (++) srcInst [dstInst] acc)
         (Map.fromList [(inst, []) | inst <- instances])
         presEdges
 
-    -- 2. Compute level for a single node whose children have already been computed
-    processNode :: Map.Map ActorInstance Int -> ActorInstance -> Map.Map ActorInstance Int
     processNode levelMap inst@(actorId, _) =
       let cost = actorCost actorId
           successors = succMap Map.! inst
           nodeLevel =
             case successors of
-              [] -> cost -- Sink node
+              [] -> cost
               succs -> cost + maximum [levelMap Map.! s | s <- succs]
        in Map.insert inst nodeLevel levelMap
 
 --------------------------------------------------------------------------------
--- 5. Multi-Core List Scheduling with Hu-Levels
+-- 4. Multi-Core List Scheduling with Hu-Levels
 --------------------------------------------------------------------------------
 
 -- | List Scheduling using Hu-levels as the priority metric onto `numCores` parallel processors.
 listSchedulingHuLevel ::
-  Int ->                                   -- ^ Number of available cores (e.g. 2)
-  [ActorInstance] ->                       -- ^ APG Vertices (firings)
-  [PrecedenceEdge] ->                      -- ^ APG Edges (precedences)
-  (IRId -> Int) ->                         -- ^ Actor execution duration function
-  Either String [ScheduledFiring]          -- ^ List of scheduled firings with core and time assignments
+  Int ->
+  [ActorInstance] ->
+  [PrecedenceEdge] ->
+  (IRId -> Int) ->
+  Either String [ScheduledFiring]
 listSchedulingHuLevel numCores instances presEdges actorCost
   | numCores <= 0 = Left "Number of cores must be strictly positive"
   | null instances = Right []
   | otherwise =
-      let -- 1. Precompute Hu-levels for priority ranking
-          huLevels = computeHuLevels instances presEdges actorCost
-
-          -- 2. Build map of outgoing edges: Producer -> [Consumers]
+      let huLevels = computeHuLevels instances presEdges actorCost
           succMap =
-            foldl'
+            foldl
               (\m (s, d) -> Map.insertWith (++) s [d] m)
               (Map.fromList [(inst, []) | inst <- instances])
               presEdges
-
-          -- 3. Calculate initial in-degrees (number of unmet dependencies) for all instances
+          initInDegrees :: Map.Map ActorInstance Int
           initInDegrees =
-            foldl'
-              (\m (_, d) -> Map.adjust (+ 1) d m)
-              (Map.fromList [(inst, 0) | inst <- instances])
+            foldl
+              (\m (_, d) -> Map.adjust (+ (1 :: Int)) d m)
+              (Map.fromList [(inst, 0 :: Int) | inst <- instances])
               presEdges
-
-          -- 4. Initial pool of ready tasks: tasks with inDegree == 0 (Sources of all components)
           initReady =
             [ inst
             | (inst, deg) <- Map.toList initInDegrees,
-              deg == 0
+              deg == (0 :: Int)
             ]
-
-          -- 5. Initially, all cores are idle
           initIdleCores = [0 .. numCores - 1]
-
-       in scheduleLoop 0 initIdleCores [] initInDegrees initReady [] succMap huLevels Map.empty
+       in scheduleLoop (0 :: Int) initIdleCores [] initInDegrees initReady [] succMap huLevels Map.empty
   where
-    -- Discrete-event scheduling loop stepping forward through time
     scheduleLoop ::
-      Int ->                                     -- ^ Current simulation time (currentTime)
-      [Int] ->                                   -- ^ Idle core IDs
-      [ActiveTask] ->                            -- ^ Tasks currently running on cores
-      Map.Map ActorInstance Int ->               -- ^ Remaining in-degrees (unmet dependency count)
-      [ActorInstance] ->                         -- ^ Ready queue (tasks whose dependencies are all met)
-      [ScheduledFiring] ->                       -- ^ Accumulator of scheduled firings
-      Map.Map ActorInstance [ActorInstance] ->   -- ^ Successor map
-      Map.Map ActorInstance Int ->               -- ^ Hu-levels lookup map
-      Map.Map IRId Int ->                        -- ^ Actor core affinity map
+      Int ->
+      [Int] ->
+      [ActiveTask] ->
+      Map.Map ActorInstance Int ->
+      [ActorInstance] ->
+      [ScheduledFiring] ->
+      Map.Map ActorInstance [ActorInstance] ->
+      Map.Map ActorInstance Int ->
+      Map.Map IRId Int ->
       Either String [ScheduledFiring]
     scheduleLoop currentTime idleCores activeTasks inDegrees readyQueue schedAcc succs levels actorAffinity =
-      let -- Check if any running tasks finish at or before currentTime
-          (finishedTasks, runningTasks) =
+      let (finishedTasks, runningTasks) =
             partition (\at -> atFinishTime at <= currentTime) activeTasks
        in if not (null finishedTasks)
             then
-              -- A task has completed!
-              -- 1. Free its core
               let newlyFreedCores = map atCore finishedTasks
                   updatedIdleCores = idleCores ++ newlyFreedCores
-
-                  -- 2. Decrement in-degree for all downstream consumers of completed tasks
                   finishedInstances = map atInstance finishedTasks
                   allConsumers = concatMap (\inst -> Map.findWithDefault [] inst succs) finishedInstances
-
                   (updatedInDegrees, newReadyTasks) =
-                    foldl'
+                    foldl
                       ( \(degMap, newlyReady) consumer ->
                           let newDeg = (degMap Map.! consumer) - 1
                               newMap = Map.insert consumer newDeg degMap
@@ -379,10 +266,8 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                       )
                       (inDegrees, [])
                       allConsumers
-
                   updatedReadyQueue = readyQueue ++ newReadyTasks
-               in -- Re-evaluate at currentTime with the newly available cores and tasks
-                  scheduleLoop
+               in scheduleLoop
                     currentTime
                     updatedIdleCores
                     runningTasks
@@ -393,7 +278,6 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                     levels
                     actorAffinity
             else
-              -- No tasks finished at this exact tick. Can we assign any ready tasks to idle cores?
               let sortedReady =
                     sortBy
                       ( \a b ->
@@ -402,8 +286,6 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                             other -> other
                       )
                       readyQueue
-
-                  -- Find a compatible (idleCore, readyTask) pair respecting actor core affinity
                   findCandidate [] = Nothing
                   findCandidate (c : cs) =
                     let compatible =
@@ -424,7 +306,6 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                           duration = actorCost chosenActor
                           startTime = currentTime
                           finishTime = currentTime + duration
-
                           newFiring =
                             ScheduledFiring
                               { sfCore = freeCore,
@@ -432,7 +313,6 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                                 sfStartTime = startTime,
                                 sfEndTime = finishTime
                               }
-
                           newActive =
                             ActiveTask
                               { atFinishTime = finishTime,
@@ -440,8 +320,7 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                                 atInstance = chosenTask
                               }
                           updatedAffinity = Map.insert chosenActor freeCore actorAffinity
-                       in -- Keep assigning in the same tick if more idle cores exist
-                          scheduleLoop
+                       in scheduleLoop
                             currentTime
                             remainingIdleCores
                             (newActive : runningTasks)
@@ -452,14 +331,12 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                             levels
                             updatedAffinity
                     Nothing ->
-                      -- No assignments possible right now. Check termination, deadlock, or advance time.
                       if length schedAcc == length instances && null runningTasks
                         then Right (reverse schedAcc)
                         else
                           if null runningTasks
                             then Left "Scheduler deadlock: cyclic dependency or unreachable tasks detected in APG."
                             else
-                              -- Advance simulation clock to the earliest completion time among active tasks
                               let nextTime = minimum (map atFinishTime runningTasks)
                                in scheduleLoop
                                     nextTime
@@ -472,12 +349,163 @@ listSchedulingHuLevel numCores instances presEdges actorCost
                                     levels
                                     actorAffinity
 
--- | Groups the flat scheduled firings by Core ID, ordered chronologically.
 toPerCoreSchedule :: Int -> [ScheduledFiring] -> MultiCoreSchedule
 toPerCoreSchedule numCores firings =
   let emptyMap = Map.fromList [(c, []) | c <- [0 .. numCores - 1]]
       sorted = sortBy (comparing sfStartTime) firings
-   in foldl'
+   in foldl
         (\acc sf -> Map.adjust (++ [sfInstance sf]) (sfCore sf) acc)
         emptyMap
         sorted
+
+--------------------------------------------------------------------------------
+-- 5. Multi-Core Schedule Generator & Pretty-Printer
+--------------------------------------------------------------------------------
+
+generateHuLevelSchedule :: Int -> IRSystem -> Either String Schedule
+generateHuLevelSchedule numCores irSystem
+  | numCores <= 0 = Left "Number of cores must be greater than 0."
+  | otherwise = do
+      analysis <- analyzeSDF irSystem
+      case analysis of
+        EmptyGraph actors _ ioBufSizes aliases ->
+          let coreMatrix = [tagInstances (map name actors)] ++ replicate (numCores - 1) []
+           in pure $
+                ScheduleRecord
+                  { schedStrategy = HuLevel numCores,
+                    schedCores = coreMatrix,
+                    schedBufferSizes = ioBufSizes,
+                    schedDelayBuffers = aliases,
+                    schedMetrics = Nothing
+                  }
+        AnalyzedSDF actors edges mat _ _ repCounts _ delayBuffers ioBufSizes aliases -> do
+          (instances, presEdges) <- createAcyclicPresedenceGraph actors edges mat repCounts
+          scheduledFirings <- listSchedulingHuLevel numCores instances presEdges (\_ -> 1)
+          let huLevels = computeHuLevels instances presEdges (\_ -> 1)
+              perCoreMap = toPerCoreSchedule numCores scheduledFirings
+              coreMatrix = [Map.findWithDefault [] c perCoreMap | c <- [0 .. numCores - 1]]
+
+              orderedFirings = sortBy (comparing sfStartTime) scheduledFirings
+              schedNames = map (fst . sfInstance) orderedFirings
+              actorNameList = map name actors
+              lookupIdx aName = case elemIndex aName actorNameList of
+                Just idx -> idx
+                Nothing -> error $ "Actor not found in actor list: " ++ show aName
+              schedIdxs = map lookupIdx schedNames
+              internalBufSizes = simulateBufferUsage actors edges (map initTokens edges) schedIdxs
+
+              seqSteps = length instances
+              makespanVal = if null scheduledFirings then 0 else maximum (map sfEndTime scheduledFirings)
+              speedupVal = if makespanVal > 0 then fromIntegral seqSteps / fromIntegral makespanVal else 1.0
+              criticalPathVal = if null huLevels then 0 else maximum (Map.elems huLevels)
+              ceilWoverP = (seqSteps + numCores - 1) `div` numCores
+              minPossibleMakespan = max criticalPathVal ceilWoverP
+              theoreticalSpeedupVal =
+                if minPossibleMakespan > 0
+                  then fromIntegral seqSteps / fromIntegral minPossibleMakespan
+                  else 1.0
+              metrics =
+                ScheduleMetrics
+                  { totalWork = seqSteps,
+                    criticalPath = criticalPathVal,
+                    makespan = makespanVal,
+                    actualSpeedup = speedupVal,
+                    theoreticalSpeedup = theoreticalSpeedupVal
+                  }
+
+          pure $
+            ScheduleRecord
+              { schedStrategy = HuLevel numCores,
+                schedCores = coreMatrix,
+                schedBufferSizes = ioBufSizes ++ internalBufSizes,
+                schedDelayBuffers = delayBuffers ++ aliases,
+                schedMetrics = Just metrics
+              }
+
+prettyHuLevelSchedule :: Int -> IRSystem -> Schedule -> String
+prettyHuLevelSchedule numCores irSystem sched =
+  case analyzeSDF irSystem of
+    Left e -> "Error: " ++ e ++ "\n"
+    Right (EmptyGraph _ _ _ _) -> "No internal edges found. All actors fire once.\n"
+    Right (AnalyzedSDF actors edges mat _ _ repCounts repsWithNames _ _ _) ->
+      let matrixStr = matrixEdgesRowsToString edges actors mat
+          repVecStr = intercalate "\n" ["  " ++ show a ++ " = " ++ show r | (a, r) <- repsWithNames]
+       in case createAcyclicPresedenceGraph actors edges mat repCounts of
+            Left err -> "Error constructing APG: " ++ err ++ "\n"
+            Right (instances, presEdges) ->
+              let huLevels = computeHuLevels instances presEdges (\_ -> 1)
+                  huLevelStr = unlines ["  " ++ show (fst inst) ++ "^" ++ show (snd inst) ++ " : Hu-Level " ++ show lvl | (inst, lvl) <- Map.toList huLevels]
+
+                  formatCore (c, coreFirings) =
+                    let summary = intercalate ", " [show a ++ "^" ++ show idx | (a, idx) <- coreFirings]
+                     in "Core " ++ show c ++ ":\n"
+                          ++ "  Sequence: ["
+                          ++ summary
+                          ++ "]\n"
+
+                  perCoreStr = unlines (map formatCore (zip [0 .. numCores - 1] (schedCores sched)))
+
+                  metricsStr = case schedMetrics sched of
+                    Nothing -> ""
+                    Just m ->
+                      let ceilWoverP = (totalWork m + numCores - 1) `div` numCores
+                       in "------------------------------------------------------------\n"
+                            ++ "Schedule Metrics:\n"
+                            ++ "------------------------------------------------------------\n"
+                            ++ "  Total Work (W)         : "
+                            ++ show (totalWork m)
+                            ++ " firings\n"
+                            ++ "  Critical Path (L)      : "
+                            ++ show (criticalPath m)
+                            ++ " ticks\n"
+                            ++ "  Min Theoretical Makespan: "
+                            ++ show (max (criticalPath m) ceilWoverP)
+                            ++ " ticks (max(L, ceil(W/P)) = max("
+                            ++ show (criticalPath m)
+                            ++ ", "
+                            ++ show ceilWoverP
+                            ++ "))\n"
+                            ++ "  Actual Makespan        : "
+                            ++ show (makespan m)
+                            ++ " cycles / ticks\n"
+                            ++ "  Actual Speedup         : "
+                            ++ show ((fromIntegral (round (actualSpeedup m * 100) :: Int) / 100.0) :: Double)
+                            ++ "x\n"
+                            ++ "  Theoretical Max Speedup: "
+                            ++ show ((fromIntegral (round (theoreticalSpeedup m * 100) :: Int) / 100.0) :: Double)
+                            ++ "x (for "
+                            ++ show numCores
+                            ++ " cores)\n"
+
+                  bufStr =
+                    "------------------------------------------------------------\n"
+                      ++ "Buffer Sizes:\n"
+                      ++ "------------------------------------------------------------\n"
+                      ++ unlines ["  " ++ show b ++ ": " ++ show sz | (b, sz) <- schedBufferSizes sched]
+               in "============================================================\n"
+                    ++ "           Multi-Core Periodic SDF Schedule (Hu-Level)      \n"
+                    ++ "============================================================\n\n"
+                    ++ "Target Cores: "
+                    ++ show numCores
+                    ++ "\n\n"
+                    ++ matrixStr
+                    ++ "\n\n"
+                    ++ "Repetition Vector (Firings per period):\n"
+                    ++ repVecStr
+                    ++ "\n\n"
+                    ++ "Acyclic Precedence Graph (APG):\n"
+                    ++ "  Total firings (vertices)      : "
+                    ++ show (length instances)
+                    ++ "\n"
+                    ++ "  Precedence constraints (edges): "
+                    ++ show (length presEdges)
+                    ++ "\n\n"
+                    ++ "Hu-Levels (Critical path distance to sink):\n"
+                    ++ huLevelStr
+                    ++ "\n"
+                    ++ "------------------------------------------------------------\n"
+                    ++ "Schedule per Core:\n"
+                    ++ "------------------------------------------------------------\n"
+                    ++ perCoreStr
+                    ++ metricsStr
+                    ++ bufStr
