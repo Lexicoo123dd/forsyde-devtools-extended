@@ -1,17 +1,16 @@
 module Compiler.ForSyDeIO where
 
 import Compiler.ForSyDeIR
-import Data.List (find, intercalate)
+import Data.List (find)
 import Data.Maybe (mapMaybe)
-import Text.Printf (printf)
+import Prettyprinter
+import Prettyprinter.Render.String (renderString)
 
-prettySignalField :: IRId -> [IRSignal] -> Bool -> String -> String
-prettySignalField signal signals useTargetRate indent =
-  printf "%s\"%s\": %d_i"
-    indent
-    (show signal)
-    (if useTargetRate then targetRate else sourceRate)
+prettySignalField :: IRId -> [IRSignal] -> Bool -> Doc ann
+prettySignalField signal signals useTargetRate =
+  dquotes (pretty (show signal)) <> colon <+> pretty rate <> pretty "_i"
   where
+    rate = if useTargetRate then targetRate else sourceRate
     -- Finds the signal among all signal IRs to extract its source and target rate
     -- Don't think a missing signal should be possible, so it throws an error
     IRSignal _ (_, sourceRate) (_, targetRate) =
@@ -19,102 +18,90 @@ prettySignalField signal signals useTargetRate indent =
         Just s -> s
         Nothing -> error ("Signal not found: " ++ show signal)
 
-prettyProCon :: [IRId] -> [IRSignal] -> Bool -> String -> String
-prettyProCon signalIds signalIRs isProducer indent =
-  printf "%s\"%s\": {\n\
-          \%s\n\
-          \%s}%s"
-    indent
-    text
-    (intercalate ",\n" (map (\s -> prettySignalField s signalIRs useTargetRate indent2) signalIds))
-    indent
-    endText
+prettyProCon :: [IRId] -> [IRSignal] -> Bool -> Doc ann
+prettyProCon signalIds signalIRs isProducer =
+  vsep
+    [ dquotes (pretty text) <> colon <+> lbrace,
+      indent 2 (vsep fields),
+      rbrace <> if isProducer then mempty else comma
+    ]
   where
     text = if isProducer then "production" else "consumption"
-    useTargetRate = if isProducer then False else True
-    endText = if isProducer then "" else ","
-    indent2 = "  " ++ indent
+    useTargetRate = not isProducer
+    fields = punctuate comma (map (\s -> prettySignalField s signalIRs useTargetRate) signalIds)
 
-prettyConstructor :: IRConstructor -> [IRSignal] -> String -> Maybe String
-prettyConstructor (IRDelay _ _ (_, _)) _ _ = Nothing
-prettyConstructor (IRActor actorId _type _functionId (inputSignals, outputSignals)) signals indent =
-  Just $ printf "%svertex \"%s\"\n\
-                 \%s[moc::sdf::SDFActor, visualization::Visualizable]\n\
-                 \%s(combFunctions, %s, %s)\n\
-                 \%s{\n\
-                 \%s\n\
-                 \%s\n\
-                 \%s}"
-    indent
-    (show actorId)
-    indent
-    indent
-    (intercalate ", " (map show inputSignals))
-    (intercalate ", " (map show outputSignals))
-    indent
-    (prettyProCon inputSignals signals False ("  " ++ indent))
-    (prettyProCon outputSignals signals True ("  " ++ indent))
-    indent
+prettyConstructor :: IRConstructor -> [IRSignal] -> Maybe (Doc ann)
+prettyConstructor (IRDelay _ _ (_, _)) _ = Nothing
+prettyConstructor (IRActor actorId _type _functionId (inputSignals, outputSignals)) signals =
+  Just $ vsep
+    [ pretty "vertex" <+> dquotes (pretty (show actorId)),
+      pretty "[moc::sdf::SDFActor, visualization::Visualizable]",
+      parens $ hsep $ punctuate comma
+        [ pretty "combFunctions",
+          hsep $ punctuate comma $ map (pretty . show) inputSignals,
+          hsep $ punctuate comma $ map (pretty . show) outputSignals
+        ],
+      lbrace,
+      indent 2 $ vsep
+        [ prettyProCon inputSignals signals False,
+          prettyProCon outputSignals signals True
+        ],
+      rbrace
+    ]
 
-prettySignal :: IRId -> [IRConstructor] -> String -> String
-prettySignal signalId constructors indent =
-    printf "%svertex \"%s_sig\"\n\
-                   \%s[moc::sdf::SDFChannel, visualization::Visualizable]\n\
-                   \%s(producer, consumer, initialTokenValues)\n\
-                   \%s{\n\
-                   \%s\"numOfInitialTokens\": %d_i\n\
-                   \%s}"
-      indent
-      signalIdText
-      indent
-      indent
-      indent
-      indent2
-      delayCount
-      indent
+prettySignal :: IRId -> [IRConstructor] -> Doc ann
+prettySignal signalId constructors =
+    vsep
+      [ pretty "vertex" <+> dquotes (pretty $ show signalId <> "_sig"),
+        pretty "[moc::sdf::SDFChannel, visualization::Visualizable]",
+        pretty "(producer, consumer, initialTokenValues)",
+        lbrace,
+        indent 2 $ dquotes (pretty "numOfInitialTokens") <> colon <+> delayCount <> pretty "_i",
+        rbrace
+      ]
   where
-    signalIdText = show signalId
     -- A signal has a delay if there exists an IRDelay constructor with the signal as an input
     -- That IRDelay has a list of those delays ("tokens")
-    delayCount = case find matches constructors of
+    delayCount = pretty $ case find matches constructors of
       Just (IRDelay _ tokens _) -> length tokens
       _ -> 0
     matches (IRDelay _ _ (inputSignal, _)) = inputSignal == signalId
     matches _ = False
-    indent2 = "  " ++ indent
 
-prettyActorEdge :: IRId -> IRId -> [IRId] -> String -> Maybe String
-prettyActorEdge actorId outputSignalId globalOutputs indent
+prettyActorEdge :: IRId -> IRId -> [IRId] -> Maybe (Doc ann)
+prettyActorEdge actorId outputSignalId globalOutputs
   -- Skip creating edges to global outputs
   | any (==outputSignalId) globalOutputs = Nothing
   | otherwise =
-    Just $ printf "%sedge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from \"%s\" port \"%s\" to \"%s\" port \"producer\""
-      indent
-      (show actorId)
-      (show outputSignalId)
-      (show outputSignalId ++ "_sig")
+    Just $ pretty "edge [moc::sdf::SDFDataEdge, visualization::VisualConnection]" <+> fromActor <+> fromPort <+> toActor <+> toPort
+    where
+      fromActor = pretty "from" <+> dquotes (pretty $ show actorId)
+      fromPort = pretty "port" <+> dquotes (pretty $ show outputSignalId)
+      toActor = pretty "to" <+> dquotes (pretty $ show outputSignalId <> "_sig")
+      toPort = pretty "port" <+> dquotes (pretty "producer")
 
-prettySignalEdge :: IRId -> IRId -> IRId -> String -> String
-prettySignalEdge signalId outputActorId outputPort indent =
-    printf "%sedge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from \"%s\" port \"consumer\" to \"%s\" port \"%s\""
-      indent
-      (show signalId ++ "_sig")
-      (show outputActorId)
-      (show outputPort)
+prettySignalEdge :: IRId -> IRId -> IRId -> Doc ann
+prettySignalEdge signalId outputActorId outputPort =
+  pretty "edge [moc::sdf::SDFDataEdge, visualization::VisualConnection]" <+> fromActor <+> fromPort <+> toActor <+> toPort
+  where
+    fromActor = pretty "from" <+> dquotes (pretty $ show signalId <> "_sig")
+    fromPort = pretty "port" <+> dquotes (pretty "consumer")
+    toActor = pretty "to" <+> dquotes (pretty $ show outputActorId)
+    toPort = pretty "port" <+> dquotes (pretty $ show outputPort)
 
 prettyIOGlobal :: IRSystem -> String
 prettyIOGlobal (IRSystem (globalInputs, globalOutputs) constructors signals _functions) =
-  let indent = "  " in
-  printf "systemgraph {\n\
-          \%s\n\n\
-          \%s\n\n\
-          \%s\n\
-          \%s\n\
-          \}"
-    (intercalate "\n" $ mapMaybe (\c -> prettyConstructor c signals indent) constructors)
-    (intercalate "\n" $ map (\(s, _) -> prettySignal s constructors indent) signalEdges)
-    (intercalate "\n" $ mapMaybe (\(c, s) -> prettyActorEdge c s globalOutputs indent) actorEdges)
-    (intercalate "\n" $ map (\(s, (t, p)) -> prettySignalEdge s t p indent) signalEdges)
+  let document = vsep
+        [ pretty "systemgraph" <+> lbrace,
+          indent 2 $ vsep
+            [ vsep $ mapMaybe (\c -> prettyConstructor c signals) constructors,
+              vsep $ map (\(s, _) -> prettySignal s constructors) signalEdges,
+              vsep $ mapMaybe (\(c, s) -> prettyActorEdge c s globalOutputs) actorEdges,
+              vsep $ map (\(s, (t, p)) -> prettySignalEdge s t p) signalEdges
+            ],
+          rbrace
+        ]
+  in renderString $ layoutPretty defaultLayoutOptions document
   where
     signalEdges = mapMaybe getSignalEdges signals
     actorEdges = concatMap getActorEdges constructors
