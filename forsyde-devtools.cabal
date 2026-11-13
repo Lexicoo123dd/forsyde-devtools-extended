@@ -53,6 +53,9 @@ library
     ProceduralIRToC
     SDFSchedule
     Schedule
+    Schedule.Common
+    Schedule.Greedy
+    Schedule.HuLevel
     Utilities
 
 library examples
@@ -81,6 +84,9 @@ executable forsyde-compiler-exe
     ProceduralIRToC
     SDFSchedule
     Schedule
+    Schedule.Common
+    Schedule.Greedy
+    Schedule.HuLevel
     Utilities
 
 executable forsyde-lsp-exe
@@ -101,6 +107,9 @@ executable forsyde-lsp-exe
     ProceduralIR
     SDFSchedule
     Schedule
+    Schedule.Common
+    Schedule.Greedy
+    Schedule.HuLevel
     SKGraphSchema
     Utilities
 

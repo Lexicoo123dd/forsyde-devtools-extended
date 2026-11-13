@@ -8,7 +8,7 @@ where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Runs (Limited, Perpetual), Target (PC, PICO2))
 import CoreIRToProceduralIR (translateIRFunction)
-import Data.List (nub)
+import Data.List (find, nub)
 import ForSyDeIR
 import GHC hiding (Target, targetId)
 import ProceduralIR
@@ -19,34 +19,12 @@ data BufferKind = BufferNonBlocking | BufferBlocking
   deriving (Show, Eq)
 
 -- | Determines whether a signal buffer should be blocking or non-blocking.
--- In multi-core, buffers are created as blocking (using lock-free SPSC queues).
--- The modular design allows checking whether source and target actors reside on the same core
--- to enable intra-core non-blocking buffer optimization in the future.
+-- In single-core execution (<= 1 core), buffers are non-blocking.
+-- In multi-core execution, buffers use thread-safe blocking SPSC queues.
 determineBufferKind :: [[ActorInstance]] -> [(IRId, IRSignal)] -> IRId -> BufferKind
-determineBufferKind coreSchedule sigLookup sigId
+determineBufferKind coreSchedule _ _
   | length coreSchedule <= 1 = BufferNonBlocking
-  | otherwise =
-      -- Modular structure: inspect source and target core placement
-      let _sourceCore = findCore (getSourceActor sigId sigLookup) coreSchedule
-          _targetCore = findCore (getTargetActor sigId sigLookup) coreSchedule
-       in BufferBlocking
-  where
-    getSourceActor sId sigs =
-      case lookup sId sigs of
-        Just (IRSignal _ (srcId, _) _) -> Just srcId
-        Nothing -> Nothing
-
-    getTargetActor sId sigs =
-      case lookup sId sigs of
-        Just (IRSignal _ _ (dstId, _)) -> Just dstId
-        Nothing -> Nothing
-
-    findCore Nothing _ = Nothing
-    findCore (Just aId) cores =
-      let matches = [c :: Int | (c, firings) <- zip [0 ..] cores, any (\(act, _) -> act == aId) firings]
-       in case matches of
-            (c : _) -> Just c
-            [] -> Nothing
+  | otherwise = BufferBlocking
 
 -- | Generates an `input.h` header with #define NUM_ITERATIONS, consumption rates,
 -- and placeholder static arrays for each system input.
@@ -57,7 +35,7 @@ generateInputHeader (IRSystem (inputList, _) _ irSignals _) schedule =
       footerGuard = "#endif // INPUT_H\n"
 
       genInputDef sigId =
-        let (tgtActorId, tgtRate) = case lookupSig sigId irSignals of
+        let (tgtActorId, tgtRate) = case find (\(IRSignal id' _ _) -> id' == sigId) irSignals of
               Just (IRSignal _ _ (dstId, rate)) -> (dstId, rate)
               Nothing -> (sigId, 1)
             reps = length (filter (== tgtActorId) flatSched)
@@ -65,11 +43,6 @@ generateInputHeader (IRSystem (inputList, _) _ irSignals _) schedule =
             rateDef = "#define RATE_" ++ show sigId ++ " " ++ show totalRate ++ "\n"
             arrayDecl = "static const token input_" ++ show sigId ++ "[NUM_ITERATIONS * RATE_" ++ show sigId ++ "] = { 0 };\n"
          in rateDef ++ arrayDecl ++ "\n"
-
-      lookupSig _ [] = Nothing
-      lookupSig sId (s@(IRSignal id' _ _) : rest)
-        | id' == sId = Just s
-        | otherwise = lookupSig sId rest
 
       body =
         if null inputList
@@ -282,6 +255,9 @@ makeMultiCoreMain context cores bufferList delayBufferList constructors target n
         _ -> acc
       delayStmts = foldl' foldDelayTokens [] constructors
 
+      benchStartStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_START" [])] else []
+      benchEndStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_END" [])] else []
+
       threadStmts = case target of
         PC ->
           let otherCores = [1 .. numCores - 1]
@@ -296,8 +272,6 @@ makeMultiCoreMain context cores bufferList delayBufferList constructors target n
                         EVar "NULL"
                       ]
                   )
-              benchStartStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_START" [])] else []
-              benchEndStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_END" [])] else []
               runCore0 = SExpr (ECall "run_core_0" [EVar "NULL"])
               joinThread c = SExpr (ECall "pthread_join" [EVar ("thread_" ++ show c), EVar "NULL"])
            in map threadDecl otherCores
@@ -307,9 +281,7 @@ makeMultiCoreMain context cores bufferList delayBufferList constructors target n
                 ++ map joinThread otherCores
                 ++ benchEndStmts
         PICO2 ->
-          let benchStartStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_START" [])] else []
-              benchEndStmts = if benchmarkEnabled context then [SExpr (ECall "BENCH_END" [])] else []
-              launchCore1 = SExpr (ECall "multicore_launch_core1" [EVar "run_core_1"])
+          let launchCore1 = SExpr (ECall "multicore_launch_core1" [EVar "run_core_1"])
               runCore0 = SExpr (ECall "run_core_0" [])
            in benchStartStmts ++ [launchCore1, runCore0] ++ benchEndStmts
 
