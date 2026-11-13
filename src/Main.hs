@@ -11,7 +11,7 @@ import Compiler.ProceduralIRToC (translateProgram)
 import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
 import Options.Applicative
 
-import Compiler.ForSyDeIO (prettyIOGlobal)
+import Compiler.ForSyDeIO (prettyForSyDeIO)
 
 {-
 
@@ -97,7 +97,7 @@ run (Arguments (InputFile input_file) output_file outputType target inputType ru
           translateProgram proceduralIR target inputType True
         OutputForSyDeIO -> do
           let (forsydeIR, _) = translateCoreHelper dflags core
-          prettyIOGlobal forsydeIR
+          prettyForSyDeIO forsydeIR
   write_output output_file outputType outputIR
   where
     translateCoreHelper dflags core = case translateCoreProgram dflags core of

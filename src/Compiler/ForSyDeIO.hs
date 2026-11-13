@@ -1,4 +1,4 @@
-module Compiler.ForSyDeIO where
+module Compiler.ForSyDeIO (prettyForSyDeIO) where
 
 import Compiler.ForSyDeIR
 import Data.List (find)
@@ -8,7 +8,7 @@ import Prettyprinter.Render.String (renderString)
 
 prettySignalField :: IRId -> [IRSignal] -> Bool -> Doc ann
 prettySignalField signal signals useTargetRate =
-  dquotes (pretty (show signal)) <> colon <+> pretty rate <> pretty "_i"
+  dquotes (pretty $ show signal) <> colon <+> pretty rate <> pretty "_i"
   where
     rate = if useTargetRate then targetRate else sourceRate
     -- Finds the signal among all signal IRs to extract its source and target rate
@@ -89,8 +89,8 @@ prettySignalEdge signalId outputActorId outputPort =
     toActor = pretty "to" <+> dquotes (pretty $ show outputActorId)
     toPort = pretty "port" <+> dquotes (pretty $ show outputPort)
 
-prettyIOGlobal :: IRSystem -> String
-prettyIOGlobal (IRSystem (globalInputs, globalOutputs) constructors signals _functions) =
+prettyForSyDeIO :: IRSystem -> String
+prettyForSyDeIO (IRSystem (globalInputs, globalOutputs) constructors signals _functions) =
   let document = vsep
         [ pretty "systemgraph" <+> lbrace,
           indent 2 $ vsep
