@@ -35,7 +35,7 @@ createSignalsFromArguments context pcId arguments =
       case getSourceFromArgument currentContext argument of
         Left e -> Left e
         Right (sourceId, sourceRate) ->
-          let newSignal = IRSignal argument IRUnknownType (sourceId, sourceRate) (pcId, rate)
+          let newSignal = IRSignal argument TUnknown (sourceId, sourceRate) (pcId, rate)
               newSignals = (argument, newSignal) : (signals currentContext)
               context1 = currentContext {signals = newSignals}
            in pure $ updateConstructorsInputs context1 pcId argument
@@ -126,7 +126,7 @@ updateConstructorsAndSignals initialContext = do
             Just signalType ->
               (signalId, IRSignal signalId signalType source target)
             Nothing ->
-              (signalId, IRSignal signalId IRUnknownType source target)
+              (signalId, IRSignal signalId TUnknown source target)
         | (signalId, IRSignal _ _ source target) <- signals finalContext
         ]
 
@@ -146,7 +146,7 @@ updateConstructorsAndSignals initialContext = do
                 case (lookup pcId (pcRates currentContext)) of
                   Nothing -> Left ("updateConstructorsAndSignals - No rates found for process constructor: " ++ show pcId)
                   Just (_, outRates) -> do
-                    let newSig = IRSignal signalId IRUnknownType (pcId, outRates !! sourceRate) (targetId, targetRate)
+                    let newSig = IRSignal signalId TUnknown (pcId, outRates !! sourceRate) (targetId, targetRate)
                     context1 <- updateConstructorsOutputs currentContext signalId pcId sourceRate
                     pure (context1, (signalId, newSig) : acc)
               _ -> Left ("updateConstructorsAndSignals - Binder is not associated with any process constructors")

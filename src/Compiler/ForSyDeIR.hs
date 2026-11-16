@@ -16,13 +16,14 @@ module Compiler.ForSyDeIR
     IRId (..),
     IRSpan,
     irIdToSpan,
-    IRLiteral (..),
+    DataLiteral (..),
+    DataType (..),
     coreLiteralToIR,
-    IRType (..),
   )
 where
 
 import Compiler.CoreIR (prettyCoreExpr)
+import Compiler.Types
 import Data.Aeson
 import Data.Aeson.Encode.Pretty
 import Data.Function
@@ -46,26 +47,13 @@ data IRId
   | IRString String
   | Empty
 
-data IRLiteral
-  = IRInt Int
-  | IRFloat Float
-  | IRBool Bool
-  deriving (Show, Eq)
-
-data IRType
-  = IRIntType
-  | IRFloatType
-  | IRBoolType
-  | IRUnknownType
-  deriving (Show, Eq)
-
-coreLiteralToIR :: Literal -> Maybe IRLiteral
+coreLiteralToIR :: Literal -> Maybe DataLiteral
 coreLiteralToIR lit =
   case lit of
     LitNumber LitNumInt n ->
-      Just (IRInt (fromIntegral n))
+      Just (LInt (fromIntegral n))
     LitFloat f ->
-      Just (IRFloat (fromRational f))
+      Just (LFloat (fromRational f))
     _ ->
       Nothing
 
@@ -151,14 +139,14 @@ data ActorType
 -- IRDelay(delayId, tokens, (inputSignal, outputSignal))
 -- IRActor(actorId, actorType, functionId (inputSignals, outputSignals))
 data IRConstructor
-  = IRDelay IRId [IRLiteral] (IRId, IRId)
+  = IRDelay IRId [DataLiteral] (IRId, IRId)
   | IRActor IRId ActorType IRId ([IRId], [IRId])
 
 -- IRSignal(signalId (sourceId, sourceRate) (targetId, targetRate))
-data IRSignal = IRSignal IRId IRType (IRId, Int) (IRId, Int) deriving (Show)
+data IRSignal = IRSignal IRId DataType (IRId, Int) (IRId, Int) deriving (Show)
 
 -- IRFunction(functionId, maybe function)
-data IRFunction = IRFunction IRId (Maybe CoreExpr) ([IRType], [IRType])
+data IRFunction = IRFunction IRId (Maybe CoreExpr) ([DataType], [DataType])
 
 -- IRSystem((globalInputs, globalOutputs), constructors, signals, functions)
 data IRSystem = IRSystem ([IRId], [IRId]) [IRConstructor] [IRSignal] [IRFunction]
@@ -234,14 +222,6 @@ instance Show IRSystem where
 
 instance ToJSON ActorType where
   toJSON a = String $ Text.pack $ show a
-
-instance ToJSON IRLiteral where
-  toJSON (IRInt n) =
-    object ["type" .= ("Int" :: Text.Text), "value" .= n]
-  toJSON (IRFloat f) =
-    object ["type" .= ("Float" :: Text.Text), "value" .= f]
-  toJSON (IRBool b) =
-    object ["type" .= ("Bool" :: Text.Text), "value" .= b]
 
 instance ToJSON IRConstructor where
   toJSON (IRDelay name tokens (_, _)) =

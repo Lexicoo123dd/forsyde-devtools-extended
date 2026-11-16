@@ -1,3 +1,8 @@
+-- | Procedural intermediate representation used by the ForSyDe compiler.
+--
+-- Primitive data types and literal values are defined centrally in
+-- "Compiler.Types". This module only defines the procedural/C-oriented
+-- type constructors and IR nodes that build on those shared definitions.
 module Compiler.ProceduralIR
   ( UnaryOperator (..),
     BinaryOperator (..),
@@ -17,10 +22,11 @@ module Compiler.ProceduralIR
     prettyStatement,
     prettyGlobal,
     prettyProgram,
+    prettyIRType,
   )
 where
 
-import Compiler.ForSyDeIR
+import Compiler.Types (DataLiteral (..), DataType (..), prettyDataType)
 import Data.List (intercalate)
 import Text.Printf (printf)
 
@@ -64,13 +70,11 @@ data BinaryOperator
   | GreaterEqual -- lhs >= rhs
   deriving (Show)
 
--- Types
+-- | Procedural/C-level types. Primitive types are represented by 'TData'
+-- and use the canonical 'DataType' definition from "Compiler.Types".
 data Type
   = TVoid
-  | TInt
-  | TBool
-  | TFloat
-  | TChar
+  | TData DataType
   | TToken
   | TIdent String
   | TPointer Type -- int *pointer
@@ -78,25 +82,42 @@ data Type
   | TFunctionPointer Type [Type] -- int (*pointer)(int, int)
   | TQualifiedType [TypeQualifier] Type
 
+-- | Convenient IR aliases for the canonical primitive data types.
+-- tInt, tBool, tFloat, tChar :: Type
+-- tInt = TData TInt
+-- tBool = TData TBool
+-- tFloat = TData TFloat
+-- tChar = TData TChar
+
 -- Expressions
 data Expression
   = EVar String
-  | EInt Int
-  | EBool Bool
-  | EFloat Float
-  | EChar Char
+  | ELit DataLiteral
   | EString String
   | EBinOp BinaryOperator Expression Expression
   | EUnOp UnaryOperator Expression
   | ECall String [Expression] -- string(), simple function call
   | ECallExpr Expression [Expression] -- abc.foo(), enable more complex function call
-  | EArrayAccess Expression Expression -- expr[expr], modified from cigrid for better expressiveness
+  | EArrayAccess Expression Expression
   | EReference Expression -- &expr
   | EDereference Expression -- (*expr)
   | EMemberAccess Expression String -- expr.string
   | EPointerAccess Expression String -- expr->string
   | EParen Expression -- (expr)
   deriving (Show)
+
+-- -- Compatibility patterns backed by the shared DataLiteral type.
+-- pattern EInt :: Int -> Expression
+-- pattern EInt n = ELit (LInt n)
+--
+-- pattern EFloat :: Float -> Expression
+-- pattern EFloat f = ELit (LFloat f)
+--
+-- pattern EBool :: Bool -> Expression
+-- pattern EBool b = ELit (LBool b)
+--
+-- pattern EChar :: Char -> Expression
+-- pattern EChar c = ELit (LChar c)
 
 -- Statements
 data Statement
@@ -118,8 +139,8 @@ data Statement
 
 -- Globals
 data Global
-  = GFuncDeclare (Maybe StorageClass) Type String [(Type, String)] ([IRType], [IRType])
-  | GFuncDef (Maybe StorageClass) Type String [(Type, String)] ([IRType], [IRType]) Statement
+  = GFuncDeclare (Maybe StorageClass) Type String [(Type, String)] ([DataType], [DataType])
+  | GFuncDef (Maybe StorageClass) Type String [(Type, String)] ([DataType], [DataType]) Statement
   | GVarDeclare Type String
   | GVarDef Type String Expression
   | GStruct String [(Type, String)]
@@ -139,7 +160,7 @@ quotes s = "\"" ++ s ++ "\""
 indent :: String -> String
 indent = unlines . map ("  " ++) . lines
 
--- Pretty printing functions for ProceduralIR (now returning String)
+-- Pretty printing functions for ProceduralIR
 prettyUnaryOperator :: UnaryOperator -> String
 prettyUnaryOperator Negate = "-"
 prettyUnaryOperator LogicalNot = "!"
@@ -169,22 +190,25 @@ prettyBinaryOperator GreaterEqual = ">="
 prettyType :: Type -> String
 prettyType currentType = case currentType of
   TVoid -> "TVoid"
-  TInt -> "TInt"
-  TFloat -> "TFloat"
-  TChar -> "TChar"
+  TData dataType -> "TData(" ++ prettyDataType dataType ++ ")"
   TToken -> "TToken"
   TIdent tyId -> printf "TIdent(%s)" (quotes tyId)
   TPointer ty -> printf "TPointer(%s)" (prettyType ty)
   TReference ty -> printf "TReference(%s)" (prettyType ty)
-  TFunctionPointer ty typeParameters -> printf "TFunctionPointer(%s, {%s})" (prettyType ty) (intercalate ", " (map prettyType typeParameters))
-  TQualifiedType qualifers ty -> printf "%s %s" (intercalate " " (map (prettyTypeQualifier) qualifers)) (prettyType ty)
+  TFunctionPointer ty typeParameters ->
+    printf
+      "TFunctionPointer(%s, {%s})"
+      (prettyType ty)
+      (intercalate ", " (map prettyType typeParameters))
+  TQualifiedType qualifiers ty ->
+    printf
+      "%s %s"
+      (intercalate " " (map prettyTypeQualifier qualifiers))
+      (prettyType ty)
 
 prettyExpression :: Expression -> String
 prettyExpression (EVar x) = "EVar" ++ parens (quotes x)
-prettyExpression (EInt i) = "EInt" ++ parens (show i)
-prettyExpression (EFloat f) = "EFloat" ++ parens (show f)
-prettyExpression (EBool b) = "EBool" ++ parens (show b)
-prettyExpression (EChar c) = "EChar" ++ parens (show c)
+prettyExpression (ELit lit) = "ELit" ++ parens (show lit)
 prettyExpression (EString s) = "EString" ++ parens (show s)
 prettyExpression (EBinOp bop expressionA expressionB) =
   "EBinOp"
@@ -293,9 +317,7 @@ prettyStatement (SArrayAssign name index maybeLabel expression) =
           ++ ", "
           ++ prettyExpression index
           ++ ", "
-          ++ case maybeLabel of
-            Nothing -> ""
-            Just label -> quotes label
+          ++ maybe "" quotes maybeLabel
           ++ ", "
           ++ prettyExpression expression
       )
@@ -314,9 +336,7 @@ prettyStatement (SIf expression statement maybeStatement) =
           ++ ", "
           ++ prettyStatement statement
           ++ ", "
-          ++ case maybeStatement of
-            Nothing -> ""
-            Just elseStatement -> prettyStatement elseStatement
+          ++ maybe "" prettyStatement maybeStatement
       )
 prettyStatement (SWhile expression statement) =
   "SWhile"
@@ -338,10 +358,7 @@ prettyStatement (SFor initStatement condExpression updateStatement statement) =
       )
 prettyStatement SBreak = "SBreak"
 prettyStatement (SReturn maybeExpression) =
-  "SReturn"
-    ++ case maybeExpression of
-      Nothing -> ""
-      Just expression -> parens (prettyExpression expression)
+  "SReturn" ++ maybe "" (parens . prettyExpression) maybeExpression
 prettyStatement (SGoto label) = "SGoto" ++ parens (quotes label)
 prettyStatement (SLabel label) = "SLabel" ++ parens (quotes label)
 
@@ -363,11 +380,9 @@ prettyStorageClass storageClass = case storageClass of
   Extern -> "extern"
   TypeDefinition -> "typedef"
 
-prettyIRType :: IRType -> String
-prettyIRType IRIntType = "IntType"
-prettyIRType IRFloatType = "FloatType"
-prettyIRType IRBoolType = "BoolType"
-prettyIRType _ = "Should not come here..."
+-- | Pretty-print a canonical primitive type from "Compiler.Types".
+prettyIRType :: DataType -> String
+prettyIRType = prettyDataType
 
 prettyGlobal :: Global -> String
 prettyGlobal global = case global of
@@ -382,7 +397,7 @@ prettyGlobal global = case global of
       (intercalate ", " (map prettyIRType outputTypes))
   GFuncDeclare Nothing returnType funcId parameters (inputTypes, outputTypes) ->
     printf
-      "GFuncDeclare(%s, %s, {%s}, (%s -> s))"
+      "GFuncDeclare(%s, %s, {%s}, (%s -> %s))"
       (prettyType returnType)
       (quotes funcId)
       (intercalate ", " (map prettyParam parameters))
@@ -425,4 +440,5 @@ prettyGlobal global = case global of
       (intercalate ",\n" (map prettyParam fields))
 
 prettyProgram :: Program -> String
-prettyProgram (Prog globals) = intercalate "\n\n" (map prettyGlobal globals) <> "\n"
+prettyProgram (Prog globals) =
+  intercalate "\n\n" (map prettyGlobal globals) <> "\n"
