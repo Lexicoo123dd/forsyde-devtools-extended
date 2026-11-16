@@ -1,9 +1,10 @@
 module Compiler.ForSyDeIRToProceduralIR where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Runs (Limited, Perpetual))
-import Compiler.CoreIRToProceduralIR (translateIRFunction, translateIRTypeToUnionField)
+import Compiler.CoreIRToProceduralIR (translateIRFunction)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
+import Compiler.Types (cFormatSpecifier, cUnionField, literalFormatSpecifier)
 import GHC hiding (targetId)
 
 -- | The `TranslationContext` is a data type which is used to pass around
@@ -68,43 +69,43 @@ translateContextToMain context scheduleList =
       scheduledInputStmts = case ((inputType context), (runs context)) of
         (StdIn, _) -> []
         (Predefined, Perpetual) ->
-          [SVarAssign "iteration_current" (EBinOp Plus (EVar "iteration_current") (EInt 1))]
+          [SVarAssign "iteration_current" (EBinOp Plus (EVar "iteration_current") (ELit (LInt 1)))]
             ++ (foldl' resetIterationVariablesFromInputs [] (systemInputs context))
-            ++ [ SIf (EBinOp Equal (EVar "iteration_current") (EVar "iteration_max")) (SScope [SVarAssign "iteration_current" (EInt 0)]) Nothing
+            ++ [ SIf (EBinOp Equal (EVar "iteration_current") (EVar "iteration_max")) (SScope [SVarAssign "iteration_current" (ELit (LInt 0))]) Nothing
                ]
         (Predefined, Limited _) ->
-          [SVarAssign "iteration_current" (EBinOp Plus (EVar "iteration_current") (EInt 1))]
+          [SVarAssign "iteration_current" (EBinOp Plus (EVar "iteration_current") (ELit (LInt 1)))]
             ++ (foldl' resetIterationVariablesFromInputs [] (systemInputs context))
             ++ [ SIf
                    (EBinOp Equal (EVar "iteration_current") (EVar "iteration_max"))
                    ( SScope
-                       [ SVarAssign "iteration_current" (EInt 0),
+                       [ SVarAssign "iteration_current" (ELit (LInt 0)),
                          SVarAssign
                            "run_current"
-                           (EBinOp Plus (EVar "run_current") (EInt 1))
+                           (EBinOp Plus (EVar "run_current") (ELit (LInt 1)))
                        ]
                    )
                    Nothing
                ]
         where
-          resetIterationVariablesFromInputs acc x = SVarAssign ("i_" ++ show x) (EInt (0)) : acc
+          resetIterationVariablesFromInputs acc x = SVarAssign ("i_" ++ show x) (ELit (LInt (0))) : acc
       scheduledRunsStmts = case ((inputType context), (runs context)) of
         (StdIn, _) -> []
         (Predefined, Perpetual) -> []
         (Predefined, (Limited _)) -> [SIf (EBinOp Equal (EVar "run_current") (EVar "run_max")) (SScope [SBreak]) Nothing]
-      whileStmt = SWhile (EInt 1) (SScope (scheduledStmts ++ scheduledInputStmts ++ scheduledRunsStmts))
+      whileStmt = SWhile (ELit (LInt 1)) (SScope (scheduledStmts ++ scheduledInputStmts ++ scheduledRunsStmts))
       mainInitInputStmts = case (inputType context) of
-        StdIn -> [SExpr (ECall "init" []), SVarDef TInt "status" (EInt 1)]
-        Predefined -> [SExpr (ECall "init" []), SVarDef TInt "iteration_current" (EInt (0))]
+        StdIn -> [SExpr (ECall "init" []), SVarDef (TData TInt) "status" (ELit (LInt 1))]
+        Predefined -> [SExpr (ECall "init" []), SVarDef (TData TInt) "iteration_current" (ELit (LInt (0)))]
       mainInitRunsStmts = case ((inputType context), (runs context)) of
         (StdIn, _) -> []
         (Predefined, Perpetual) -> []
-        (Predefined, Limited x) -> [SVarDef TInt "run_current" (EInt (0)), SVarDef TInt "run_max" (EInt (x))]
+        (Predefined, Limited x) -> [SVarDef (TData TInt) "run_current" (ELit (LInt (0))), SVarDef (TData TInt) "run_max" (ELit (LInt (x)))]
       mainInitIterStmts = case (inputType context) of
         StdIn -> []
         Predefined -> foldl' defineIterationVariablesFromInputs [] (systemInputs context)
         where
-          defineIterationVariablesFromInputs acc x = SVarDef TInt ("i_" ++ show x) (EInt (0)) : acc
+          defineIterationVariablesFromInputs acc x = SVarDef (TData TInt) ("i_" ++ show x) (ELit (LInt (0))) : acc
       mainInitStmts =
         mainInitInputStmts
           ++ mainInitIterStmts
@@ -112,9 +113,9 @@ translateContextToMain context scheduleList =
           ++ reverse (initBuffers context)
           ++ reverse (ioTokens context)
           ++ reverse (initDelay context)
-      mainFreeStmts = reverse (freeBuffers context) ++ [SReturn (Just (EInt 0))]
+      mainFreeStmts = reverse (freeBuffers context) ++ [SReturn (Just (ELit (LInt 0)))]
       mainBody = SScope (mainInitStmts ++ [whileStmt] ++ mainFreeStmts)
-   in GFuncDef Nothing TInt "main" [] ([], []) mainBody
+   in GFuncDef Nothing (TData TInt) "main" [] ([], []) mainBody
 
 -- | Returns a list of statements corresponding to actor function calls based
 -- on a provided Schedule. Note that actor function call statements include
@@ -130,11 +131,8 @@ scheduleActors context scheduleList = foldl' foldSchedule [] scheduleList
             Nothing -> error ("schedule - actor not found: " ++ show actorId)
        in (acc ++ actorStmts)
 
-irTypeToCType :: IRType -> Compiler.ProceduralIR.Type
-irTypeToCType IRIntType = TInt
-irTypeToCType IRFloatType = TFloat
-irTypeToCType IRBoolType = TBool
-irTypeToCType IRUnknownType = error "Unknown IR type" -- How to handle this error
+irTypeToCType :: DataType -> Compiler.ProceduralIR.Type
+irTypeToCType = TData
 
 -- | Translates a component of the buffer size list provided by the SDF
 -- scheduler into an io token statment, initialisation statement, and freeing
@@ -144,13 +142,13 @@ irTypeToCType IRUnknownType = error "Unknown IR type" -- How to handle this erro
 -- NOTE: HERE IS THE HARDOCDED INPUT/OUTPUT BUFFERS
 translateBuffer :: TranslationContext -> (IRId, Int) -> TranslationContext
 translateBuffer initialContext (bufferId, bufferSize) =
-  let initStmt = SVarDef (TPointer (TIdent "buffer_nonblocking")) (show bufferId) (ECall "buffer_nonblocking_new" [EInt bufferSize])
+  let initStmt = SVarDef (TPointer (TIdent "buffer_nonblocking")) (show bufferId) (ECall "buffer_nonblocking_new" [ELit (LInt bufferSize)])
       freeStmt = SExpr (ECall "buffer_nonblocking_free" [EVar $ show bufferId])
    in if (elem bufferId (systemInputs initialContext))
         then case (inputType initialContext) of
           -- If stdin is used, then need to define input handling arrays
           StdIn ->
-            let ioTokenStmt = SArrayDecl TToken ("input_" ++ show bufferId) [EInt bufferSize]
+            let ioTokenStmt = SArrayDecl TToken ("input_" ++ show bufferId) [ELit (LInt bufferSize)]
              in initialContext {ioTokens = ioTokenStmt : ioTokens initialContext, initBuffers = initStmt : initBuffers initialContext, freeBuffers = freeStmt : freeBuffers initialContext}
           -- If input is predefined, then do not create "input_" arrays.
           -- But you still need to create the "s_" buffers for those signals
@@ -164,30 +162,19 @@ translateBuffer initialContext (bufferId, bufferSize) =
             else
               initialContext {initBuffers = initStmt : initBuffers initialContext, freeBuffers = freeStmt : freeBuffers initialContext}
 
-irLiteralToExpression :: IRLiteral -> Expression
-irLiteralToExpression literal =
-  case literal of
-    IRInt n -> EInt n
-    IRFloat f -> EFloat f
-    IRBool b -> EBool b
+irLiteralToExpression :: DataLiteral -> Expression
+irLiteralToExpression = ELit
 
-irLiteralToFormat :: IRLiteral -> String
-irLiteralToFormat literal =
-  case literal of
-    IRInt _ -> "%d\n"
-    IRFloat _ -> "%f\n"
-    IRBool _ -> "%d\n"
+irLiteralToFormat :: DataLiteral -> String
+irLiteralToFormat lit = literalFormatSpecifier lit ++ "\n"
 
--- NOTE: Greate when this file has access to IRType recived (however that is done!)
-irTypeToFormat :: IRType -> String
-irTypeToFormat irType =
-  case irType of
-    IRIntType -> "%d"
-    IRFloatType -> "%f"
-    IRBoolType -> "%d"
-    _ -> error "Unknown type, cant format it" -- How to handle the error?
+irTypeToFormat :: DataType -> String
+irTypeToFormat = cFormatSpecifier
 
-getSignalType :: TranslationContext -> IRId -> IRType
+translateIRTypeToUnionField :: DataType -> String
+translateIRTypeToUnionField = cUnionField
+
+getSignalType :: TranslationContext -> IRId -> DataType
 getSignalType context signalId =
   case lookup signalId (lookupSignals context) of
     Just (IRSignal _ signalType _ _) -> signalType
@@ -205,7 +192,7 @@ translateIRConstructor initialContext constructor = case constructor of
     let maybeBufferId = lookup outputSignal (delayBuffers initialContext)
      in case maybeBufferId of
           Just bufferId ->
-            let foldDelayTokens :: [Statement] -> IRLiteral -> [Statement]
+            let foldDelayTokens :: [Statement] -> DataLiteral -> [Statement]
                 foldDelayTokens acc token =
                   let stmt =
                         if elem bufferId (systemOutputs initialContext)
@@ -228,8 +215,8 @@ translateIRConstructor initialContext constructor = case constructor of
           SExpr
             ( ECall
                 actorName
-                ( (map (\rate -> EInt (fromIntegral rate)) inputRates)
-                    ++ (map (\rate -> EInt (fromIntegral rate)) outputRates)
+                ( (map (\rate -> ELit (LInt (fromIntegral rate))) inputRates)
+                    ++ (map (\rate -> ELit (LInt (fromIntegral rate))) outputRates)
                     ++ (map (\bufferId -> EVar $ show bufferId) translatedInputSignals)
                     ++ (map (\bufferId -> EVar $ show bufferId) translatedOutputSignals)
                     ++ [EVar $ show functionId]
@@ -261,8 +248,8 @@ translateIRConstructor initialContext constructor = case constructor of
                 -- standard in.
                 scanForStmt =
                   SFor
-                    (SVarDef TInt "i" (ECall "contained_tokens" [EVar $ show signalId]))
-                    (EBinOp Less (EVar "i") (EInt (bufferSize)))
+                    (SVarDef (TData TInt) "i" (ECall "contained_tokens" [EVar $ show signalId]))
+                    (EBinOp Less (EVar "i") (ELit (LInt (bufferSize))))
                     (SExpr (EUnOp Increment (EVar "i")))
                     ( SScope
                         [ SVarAssign
@@ -279,11 +266,11 @@ translateIRConstructor initialContext constructor = case constructor of
                             )
                         ]
                     )
-                breakIfStmt = SIf (EBinOp Less (EVar "status") (EInt 1)) (SScope [SBreak]) Nothing
+                breakIfStmt = SIf (EBinOp Less (EVar "status") (ELit (LInt 1))) (SScope [SBreak]) Nothing
                 writeForStmt =
                   SFor
-                    (SVarDef TInt "i" (ECall "contained_tokens" [EVar $ show signalId]))
-                    (EBinOp Less (EVar "i") (EInt (bufferSize)))
+                    (SVarDef (TData TInt) "i" (ECall "contained_tokens" [EVar $ show signalId]))
+                    (EBinOp Less (EVar "i") (ELit (LInt (bufferSize))))
                     (SExpr (EUnOp Increment (EVar "i")))
                     (SScope [SExpr (ECall "write_token" [EVar $ show signalId, EArrayAccess (EVar ("input_" ++ show signalId)) (EVar "i")])])
              in (writeForStmt : breakIfStmt : scanForStmt : acc)
@@ -292,8 +279,8 @@ translateIRConstructor initialContext constructor = case constructor of
             let bufferSize = getTargetRate initialContext signalId
                 writeForStmt =
                   SFor
-                    (SVarDef TInt "i" (ECall "contained_tokens" [EVar $ show signalId]))
-                    (EBinOp Less (EVar "i") (EInt (bufferSize)))
+                    (SVarDef (TData TInt) "i" (ECall "contained_tokens" [EVar $ show signalId]))
+                    (EBinOp Less (EVar "i") (ELit (LInt (bufferSize))))
                     (SExpr (EUnOp Increment (EVar "i")))
                     ( SScope
                         ( [ SExpr
@@ -307,14 +294,14 @@ translateIRConstructor initialContext constructor = case constructor of
                                           ( EBinOp
                                               Multiply
                                               (EVar ("iteration_current"))
-                                              (EInt (getScheduleBufferRate signalId (schedulerBufferList initialContext)))
+                                              (ELit (LInt (getScheduleBufferRate signalId (schedulerBufferList initialContext))))
                                           )
                                           (EVar ("i_" ++ show signalId))
                                       )
                                   ]
                               )
                           ]
-                            ++ [SVarAssign ("i_" ++ show signalId) (EBinOp Plus (EVar ("i_" ++ show signalId)) (EInt 1))]
+                            ++ [SVarAssign ("i_" ++ show signalId) (EBinOp Plus (EVar ("i_" ++ show signalId)) (ELit (LInt 1)))]
                         )
                     )
              in (writeForStmt : acc)
@@ -333,8 +320,8 @@ translateIRConstructor initialContext constructor = case constructor of
 
                   forStmt =
                     SFor
-                      (SVarDef TInt "i" (EInt 0))
-                      (EBinOp Less (EVar "i") (EInt (bufferSize)))
+                      (SVarDef (TData TInt) "i" (ELit (LInt 0)))
+                      (EBinOp Less (EVar "i") (ELit (LInt (bufferSize))))
                       (SExpr (EUnOp Increment (EVar "i")))
                       scopeStmt
                   newLineStmt = SExpr (ECall "printf" [EString "\n"])

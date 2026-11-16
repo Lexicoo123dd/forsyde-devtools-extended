@@ -1,8 +1,8 @@
 module Compiler.ProceduralIRToC where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Target (PC, PICO2))
-import Compiler.ForSyDeIR (IRType (..))
 import Compiler.ProceduralIR
+import Compiler.Types (DataType (..), cTypeName, cUnionMember, translateLiteral)
 import Data.List (intercalate, nub)
 import Text.Printf (printf)
 
@@ -44,9 +44,7 @@ translateBinaryOperator GreaterEqual = ">="
 translateType :: Type -> String
 translateType currentType = case currentType of
   TVoid -> "void"
-  TInt -> "int"
-  TFloat -> "float"
-  TChar -> "char"
+  TData d -> cTypeName d
   TToken -> "token"
   TIdent s -> s
   TPointer t -> translateType t ++ " *"
@@ -63,10 +61,7 @@ translateType currentType = case currentType of
 
 translateExpression :: Expression -> String
 translateExpression (EVar x) = x
-translateExpression (EInt i) = show i
-translateExpression (EFloat f) = show f
-translateExpression (EBool b) = show b
-translateExpression (EChar c) = show c
+translateExpression (ELit lit) = translateLiteral lit
 translateExpression (EString s) = show s
 translateExpression (EBinOp bop exprA exprB) =
   translateExpression exprA ++ " " ++ translateBinaryOperator bop ++ " " ++ translateExpression exprB
@@ -209,14 +204,6 @@ translateGlobal global = case global of
       (structId)
       (intercalate ",\n" (map translateParam fields))
 
-translateIRType :: IRType -> String
-translateIRType irType =
-  case irType of
-    IRIntType -> "  int Int;"
-    IRFloatType -> "  float Float;"
-    IRBoolType -> "  int Bool;" -- Handle bools in C?
-    IRUnknownType -> ""
-
 translateProgram :: Program -> Target -> InputType -> Bool -> String
 translateProgram (Prog globals) target io includes =
   let targetText = case target of
@@ -240,12 +227,13 @@ translateProgram (Prog globals) target io includes =
         nub
           [ irType
           | (_, (inputTypes, outputTypes)) <- functionTypes,
-            irType <- inputTypes ++ outputTypes
+            irType <- inputTypes ++ outputTypes,
+            irType /= TUnknown
           ]
       unionString =
         "typedef union types {\n"
-          ++ intercalate "\n" (map (\t -> translateIRType t) uniqueTypes)
-          ++ "\n} token, tokens, Tokens;\n"
+          ++ intercalate "\n" (map cUnionMember uniqueTypes)
+          ++ "\n} token;\n"
       outputProgram =
         if includes
           then
