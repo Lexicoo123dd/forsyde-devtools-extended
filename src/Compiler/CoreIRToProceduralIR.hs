@@ -3,7 +3,12 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Compiler.CoreIRToProceduralIR where
+module Compiler.CoreIRToProceduralIR
+  ( FunctionContent (..),
+    translateIRFunction,
+    translateIRFunctionPartial,
+  )
+where
 
 import Compiler.CoreIR (literalToInt, prettyCoreAlt)
 import Compiler.ForSyDeIR
@@ -70,9 +75,19 @@ translateIRFunction function dflags constructors =
             actor : _ ->
               let (parameterList, context1) = getParameterList context actor
                   functionDeclarationGlobal = getFunctionDeclaration parameterList functionId
-                  context2 = translateFunctionExpr context1 0 0 functionExpr
+                  (context2, _) = translateFunctionExpr context1 0 0 functionExpr
                   functionDefinitionGlobal = getFunctionDefinition context2 parameterList functionId
                in Just (functionDeclarationGlobal, Just functionDefinitionGlobal)
+
+-- | Like translateIRFunction, but only for getting the functionContentList.
+-- Only used by ForSyDeIO.hs.
+translateIRFunctionPartial :: DynFlags -> IRConstructor -> CoreExpr -> [FunctionContent]
+translateIRFunctionPartial dflags actor functionExpr =
+  let context = initialTranslationContext dflags
+      (_parameterList, context1) = getParameterList context actor
+      (_context2, functionList) = translateFunctionExpr context1 0 0 functionExpr
+  in functionList
+  
 
 -- Helper function which returns the `IRActor`s associated with a provided
 -- function id
@@ -114,7 +129,7 @@ getFunctionDefinition context parametersList functionId =
 -- IR scope. The input id argument represents the current input being pattern
 -- matched. The input index argument represents index of the input the pattern
 -- matched binder represents.
-translateFunctionExpr :: TranslationContext -> Int -> Int -> CoreExpr -> TranslationContext
+translateFunctionExpr :: TranslationContext -> Int -> Int -> CoreExpr -> (TranslationContext, [FunctionContent])
 translateFunctionExpr context inputId inputIndex expr = case expr of
   -- Explicitly ignore lambdas refering to type-level binders
   Lam b e | (isTyCoVar b || (isPredTy . varType) b) -> translateFunctionExpr context inputId inputIndex e
@@ -144,30 +159,30 @@ translateFunctionExpr context inputId inputIndex expr = case expr of
     Just newInputId ->
       -- Pattern matching on a new function input pass new input id and reset
       -- index to zero
-      let context1 = translateAltList context alts newInputId 0
-       in context1
+      let (context1, functionContentList) = translateAltList context alts newInputId 0 []
+       in (context1, functionContentList)
     Nothing ->
       -- Still pattern maching on previous function input continue passing
       -- current input id and increment input index
-      let context1 = translateAltList context alts inputId (inputIndex + 1)
-       in context1
+      let (context1, functionContentList) = translateAltList context alts inputId (inputIndex + 1) []
+       in (context1, functionContentList)
   -- Reached the main content of the function
   _ ->
     let functionContentList = translateOutputExprToFunctionContentList context expr []
         scopeStmt = translateFunctionContent context functionContentList
         context1 = context {scope = scopeStmt}
-     in context1
+     in (context1, functionContentList)
 
 -- | Helper function which identifies a binder as a function input and updates
 -- the translation context with its associated Procedural IR expression
-translateAltList :: TranslationContext -> [Alt CoreBndr] -> Int -> Int -> TranslationContext
-translateAltList context alts inputId inputIndex = case alts of
-  [] -> context
+translateAltList :: TranslationContext -> [Alt CoreBndr] -> Int -> Int -> [FunctionContent] -> (TranslationContext, [FunctionContent])
+translateAltList context alts inputId inputIndex functionContentList = case alts of
+  [] -> (context, functionContentList)
   (Alt (DataAlt dc) ids e) : altsTail -> case showPpr (flags context) dc of
     -- An empty list pattern match indicates the end of function input
     "[]" ->
-      let context1 = translateFunctionExpr context inputId inputIndex e
-       in translateAltList context1 altsTail inputId inputIndex
+      let (context1, functionContentList1) = translateFunctionExpr context inputId inputIndex e
+       in translateAltList context1 altsTail inputId inputIndex functionContentList1
     -- A cons pattern match indicates a new function input, the following
     -- builds the associated variable expression for the input and updates the
     -- translation context
@@ -175,11 +190,11 @@ translateAltList context alts inputId inputIndex = case alts of
       let variableId = IRVar (ids !! 0)
           variableExpression = (EArrayAccess (EVar ("input_" ++ show (inputId + 1))) (EInt inputIndex))
           context1 = context {functionVariables = (variableId, variableExpression) : functionVariables context}
-          context2 = translateFunctionExpr context1 inputId inputIndex e
-       in translateAltList context2 altsTail inputId inputIndex
+          (context2, functionContentList1) = translateFunctionExpr context1 inputId inputIndex e
+       in translateAltList context2 altsTail inputId inputIndex functionContentList1
     _ -> error ("translateAltList - unsupported data alt: " ++ showPpr (flags context) dc)
   -- Skip DEFAULT pattern match, ignoring base case since not translating errors
-  (Alt DEFAULT _ _) : altsTail -> translateAltList context altsTail inputId inputIndex
+  (Alt DEFAULT _ _) : altsTail -> translateAltList context altsTail inputId inputIndex functionContentList
   alt : _ -> error ("translateAltList - unsupported alt: " ++ prettyCoreAlt (flags context) alt)
 
 -- | Translates the main `CoreExpr` of an `IRFunction` into a list of
