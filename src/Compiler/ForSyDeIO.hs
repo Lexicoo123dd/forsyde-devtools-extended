@@ -1,10 +1,44 @@
 module Compiler.ForSyDeIO (prettyForSyDeIO) where
 
+import Compiler.CoreIRToProceduralIR (FunctionContent (..), translateIRFunctionPartial)
 import Compiler.ForSyDeIR
+import Data.Bits (finiteBitSize)
 import Data.List (find)
+import qualified Data.Map as Map
 import Data.Maybe (mapMaybe)
+import GHC (DynFlags)
 import Prettyprinter
 import Prettyprinter.Render.String (renderString)
+
+-- Converts a list of FunctionContent e.g. [FPlus, FPlus, FDiv, FMinus, FDiv, FVar someVar, FInt 5]
+-- to a map counting the operators, in this example to [("integer add", 2), ("integer div", 2), ("integer subtract", 1)]
+functionListToMap :: [FunctionContent] -> Map.Map String Int
+functionListToMap = foldr addToMap Map.empty
+  where
+    addToMap content acc = case content of
+      FPlus -> increment "integer add" acc
+      FMinus -> increment "integer sub" acc
+      FMultiply -> increment "integer mul" acc
+      FDiv -> increment "integer div" acc
+      _ -> acc
+    increment key = Map.insertWith (+) key 1
+
+prettyFunction :: [FunctionContent] -> Doc ann
+prettyFunction functionList =
+  vsep
+    [ dquotes (pretty "operationRequirements") <> colon <+> lbrace,
+      indent 2 $ vsep
+        [ dquotes (pretty "default") <> colon <+> lbrace,
+          indent 2 $ vsep $ punctuate comma functionListPretty,
+          rbrace
+        ],
+      rbrace
+    ]
+  where
+    -- Converts a map in the form of e.g. [("integer add", 1), ("integer sub", 2)]
+    -- to a prettied list ["integer add: 1_i", "integer sub: 2_i"]
+    functionListPretty = map (\(key, value) -> dquotes (pretty key) <> colon <+> pretty value <> pretty "_i") (Map.toList functionMap)
+    functionMap = functionListToMap functionList
 
 prettySignalField :: IRId -> [IRSignal] -> Bool -> Doc ann
 prettySignalField signal signals useTargetRate =
@@ -23,31 +57,41 @@ prettyProCon signalIds signalIRs isProducer =
   vsep
     [ dquotes (pretty text) <> colon <+> lbrace,
       indent 2 (vsep fields),
-      rbrace <> if isProducer then mempty else comma
+      rbrace
     ]
   where
     text = if isProducer then "production" else "consumption"
     useTargetRate = not isProducer
     fields = punctuate comma (map (\s -> prettySignalField s signalIRs useTargetRate) signalIds)
 
-prettyConstructor :: IRConstructor -> [IRSignal] -> Maybe (Doc ann)
-prettyConstructor (IRDelay _ _ (_, _)) _ = Nothing
-prettyConstructor (IRActor actorId _type _functionId (inputSignals, outputSignals)) signals =
+prettyConstructor :: IRConstructor -> [IRSignal] -> [IRFunction] -> DynFlags -> Maybe (Doc ann)
+prettyConstructor (IRDelay _ _ (_, _)) _ _ _ = Nothing
+prettyConstructor actor@(IRActor actorId _type functionId (inputSignals, outputSignals)) signals functions dflags =
   Just $ vsep
     [ pretty "vertex" <+> dquotes (pretty (show actorId)),
-      pretty "[moc::sdf::SDFActor, visualization::Visualizable]",
+      pretty "[" <> functionTrait <> pretty "moc::sdf::SDFActor, moc::sdf::SDFComb, visualization::Visualizable]",
       parens $ hsep $ punctuate comma
         [ pretty "combFunctions",
           hsep $ punctuate comma $ map (pretty . show) inputSignals,
           hsep $ punctuate comma $ map (pretty . show) outputSignals
         ],
       lbrace,
-      indent 2 $ vsep
+      indent 2 $ vsep $ punctuate comma
         [ prettyProCon inputSignals signals False,
-          prettyProCon outputSignals signals True
+          prettyProCon outputSignals signals True,
+          prettiedFunction
         ],
       rbrace
     ]
+  where
+    function = case find (\(IRFunction fid _) -> fid == functionId) functions of
+      Just (IRFunction _ expr) -> expr
+      Nothing -> Nothing
+    (functionTrait, prettiedFunction) = case function of
+      Nothing -> (mempty, mempty)
+      Just expr ->
+        let functionList = translateIRFunctionPartial dflags actor expr
+        in (pretty "impl::InstrumentedExecutable, ", prettyFunction functionList)
 
 prettySignal :: IRId -> [IRConstructor] -> Doc ann
 prettySignal signalId constructors =
@@ -56,7 +100,10 @@ prettySignal signalId constructors =
         pretty "[moc::sdf::SDFChannel, visualization::Visualizable]",
         pretty "(producer, consumer, initialTokenValues)",
         lbrace,
-        indent 2 $ dquotes (pretty "numOfInitialTokens") <> colon <+> delayCount <> pretty "_i",
+        indent 2 $ vsep $ punctuate comma
+          [ dquotes (pretty "numOfInitialTokens") <> colon <+> delayCount <> pretty "_i",
+            dquotes (pretty "tokenSizeInBits") <> colon <+> pretty (finiteBitSize (0 :: Int)) <> pretty "_l"
+          ],
         rbrace
       ]
   where
@@ -89,12 +136,12 @@ prettySignalEdge signalId outputActorId outputPort =
     toActor = pretty "to" <+> dquotes (pretty $ show outputActorId)
     toPort = pretty "port" <+> dquotes (pretty $ show outputPort)
 
-prettyForSyDeIO :: IRSystem -> String
-prettyForSyDeIO (IRSystem (globalInputs, globalOutputs) constructors signals _functions) =
+prettyForSyDeIO :: IRSystem -> DynFlags -> String
+prettyForSyDeIO (IRSystem (globalInputs, globalOutputs) constructors signals functions) dflags =
   let document = vsep
         [ pretty "systemgraph" <+> lbrace,
           indent 2 $ vsep
-            [ vsep $ mapMaybe (\c -> prettyConstructor c signals) constructors,
+            [ vsep $ mapMaybe (\c -> prettyConstructor c signals functions dflags) constructors,
               vsep $ map (\(s, _) -> prettySignal s constructors) signalEdges,
               vsep $ mapMaybe (\(c, s) -> prettyActorEdge c s globalOutputs) actorEdges,
               vsep $ map (\(s, (t, p)) -> prettySignalEdge s t p) signalEdges

@@ -97,7 +97,7 @@ run (Arguments (InputFile input_file) output_file outputType target inputType ru
           translateProgram proceduralIR target inputType True
         OutputForSyDeIO -> do
           let (forsydeIR, _) = translateCoreHelper dflags core
-          prettyForSyDeIO forsydeIR
+          prettyForSyDeIO forsydeIR dflags
   write_output output_file outputType outputIR
   where
     translateCoreHelper dflags core = case translateCoreProgram dflags core of
