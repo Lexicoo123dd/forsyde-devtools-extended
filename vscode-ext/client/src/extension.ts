@@ -10,6 +10,7 @@ import {
 } from "vscode-languageclient/node";
 
 import { existsSync } from "fs";
+import { selectedNames } from "./sourceSelection";
 
 let client: LanguageClient;
 let socket: Socket;
@@ -60,7 +61,21 @@ export async function activate(context: ExtensionContext) {
 
   // Start the client. This will also launch the server
   console.debug("Starting ForSyDe Language Server...");
-  client.start();
+  await client.start();
+
+  // Ignore programmatic selections from diagram-to-source navigation to avoid a feedback loop.
+  context.subscriptions.push(vscode.window.onDidChangeTextEditorSelection((event) => {
+    const document = event.textEditor.document;
+    if (event.kind === undefined || document.languageId !== "haskell" || document.uri.scheme !== "file") {
+      return;
+    }
+    const ranges = event.selections.map((selection) => ({
+      start: document.offsetAt(selection.start), end: document.offsetAt(selection.end),
+    }));
+    void client.sendNotification("forsyde/sourceSelection", {
+      uri: document.uri.toString(), names: selectedNames(document.getText(), ranges),
+    });
+  }));
 }
 
 export function deactivate(): Thenable<void> | undefined {

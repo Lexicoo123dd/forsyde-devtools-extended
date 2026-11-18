@@ -9,11 +9,17 @@ import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)
 import Test.Hspec
-import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph)
+import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph, graphElementIdsForNames)
 import Visualiser.SKGraphSchema
 
 spec :: Spec
 spec = describe "KLighD diagram synthesis" $ do
+  it "maps source names to actor and signal IDs used by the diagram" $ do
+    graphElementIdsForNames pipelineModel ["a", "s_mid", "unknown"]
+      `shouldBe` ["$root$N$a", "$root$N$a$P$s_mid$E$s_mid"]
+    graphElementIdsForNames pipelineModel [] `shouldBe` []
+    graphElementIdsForNames delayModel ["delay", "s_after"]
+      `shouldBe` ["$root$N$delay", "$root$N$delay$P$s_after$E$s_after"]
   it "preserves graph identity and actor-input-output-edge ordering" $ do
     -- This synthetic path is a test fixture and is never accessed on disk.
     let path = "D:\\example\\path\\model.hs"

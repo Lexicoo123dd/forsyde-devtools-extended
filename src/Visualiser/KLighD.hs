@@ -8,7 +8,7 @@
 -- KLighD's graph schema. Keeping the mapping here lets the language server
 -- coordinate protocol messages without also knowing how diagram elements are
 -- rendered or laid out.
-module Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph) where
+module Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph, graphElementIdsForNames) where
 
 import Compiler.ForSyDeIR
 import Compiler.Scheduler.SDFSchedule (Schedule (..))
@@ -23,6 +23,21 @@ data ScheduleStatus
   | ScheduleFailed T.Text
   | ScheduleReady Schedule
   deriving (Show)
+
+-- Keep source-selection IDs identical to the IDs used during graph synthesis.
+nodeIdFor :: IRId -> T.Text
+nodeIdFor name = "$root$N$" <> T.show name
+
+edgeIdFor :: IRId -> IRId -> T.Text
+edgeIdFor sourceName name = nodeIdFor sourceName <> "$P$" <> T.show name <> "$E$" <> T.show name
+
+graphElementIdsForNames :: IRSystem -> [T.Text] -> [T.Text]
+graphElementIdsForNames (IRSystem _ constructors signals _) names =
+  [nodeIdFor name | constructor <- constructors, name <- constructorName constructor, T.show name `elem` names]
+    <> [edgeIdFor sourceName name | IRSignal name (sourceName, _) _ <- signals, T.show name `elem` names]
+  where
+    constructorName (IRActor name _ _ _) = [name]
+    constructorName (IRDelay name _ _) = [name]
 
 -- | Convert a ForSyDe IR system into the graph representation understood by
 -- KLighD. Successful schedule analysis adds buffer sizes, schedulability, and
@@ -95,7 +110,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
     -- \| Helper for createNode and global inputs / outputs
     createNode' name nodeLabel nodeRenderings nodeProperties = node
       where
-        nodeId = "$root$N$" <> T.show name
+        nodeId = nodeIdFor name
         inputSignals = findInputSignals signals name
         outputSignals = findOutputSignals signals name
         inputPortRendering = if delayId name actors then [] else [KText "▶" []]
@@ -127,7 +142,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
       where
         sourcePort = "$root$N$" <> T.show sourceName <> "$P$" <> T.show name
         targetPort = "$root$N$" <> T.show targetName <> "$P$" <> T.show name
-        edgeId = sourcePort <> "$E$" <> T.show name
+        edgeId = edgeIdFor sourceName name
         signalLabelId = edgeId <> "$L$" <> T.show name
         targetRateLabel = [KLabel {gid = signalLabelId <> "$" <> T.show targetName, label = T.show targetRate, properties = [EdgeLabelsPlacement 1]}]
         sourceRateLabel = [KLabel {gid = signalLabelId <> "$" <> T.show sourceName, label = T.show sourceRate, properties = [EdgeLabelsPlacement 2]}]

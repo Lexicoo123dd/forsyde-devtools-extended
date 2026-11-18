@@ -38,13 +38,17 @@ import Network.Socket
 import Options.Applicative
 import Prettyprinter
 import System.IO
-import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph)
+import System.FilePath (equalFilePath)
+import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph, graphElementIdsForNames)
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
 
 diagramOpenInTextEditor :: LSP.SMethod (LSP.Method_CustomMethod "diagram/openInTextEditor")
 diagramOpenInTextEditor = (LSP.SMethod_CustomMethod (Proxy @"diagram/openInTextEditor"))
+
+sourceSelectionMethod :: LSP.SMethod (LSP.Method_CustomMethod "forsyde/sourceSelection")
+sourceSelectionMethod = LSP.SMethod_CustomMethod (Proxy @"forsyde/sourceSelection")
 
 setPreferencesMethod :: LSP.SMethod (LSP.Method_CustomMethod "keith/preferences/setPreferences")
 setPreferencesMethod = (LSP.SMethod_CustomMethod (Proxy @"keith/preferences/setPreferences"))
@@ -198,6 +202,29 @@ handlers =
       LSP.notificationHandler LSP.SMethod_TextDocumentDidSave $ \_not -> do
         recomputeModel
         sendModel,
+      LSP.notificationHandler sourceSelectionMethod $ \LSP.TNotificationMessage {_params = p} -> do
+        config <- LSP.getConfig
+        let sourceFile = getKey "uri" p >>= \case
+              A.String uri -> uriTextToFilePath uri
+              _ -> Nothing
+        let names = getKey "names" p >>= \case
+              A.Array values -> Just [name | A.String name <- F.toList values]
+              _ -> Nothing
+        -- The current server configuration owns one diagram; ignore other documents.
+        case (sourceFile, names, file config, clientId config, system config) of
+          (Just selectedFile, Just selectedNames, Just modelFile, Just diagramId, Just ir)
+            | equalFilePath selectedFile modelFile -> do
+                LSP.sendNotification diagramAcceptMethod $ A.object
+                  ["clientId" .= diagramId, "action" .= A.object ["kind" .= ("allSelected" :: T.Text), "select" .= False]]
+                LSP.sendNotification diagramAcceptMethod $ A.object
+                  [ "clientId" .= diagramId,
+                    "action" .= A.object
+                      [ "kind" .= ("elementSelected" :: T.Text),
+                        "selectedElementsIDs" .= graphElementIdsForNames ir selectedNames,
+                        "deselectedElementsIDs" .= ([] :: [T.Text])
+                      ]
+                  ]
+          _ -> pure (),
       LSP.notificationHandler diagramAcceptMethod $ \LSP.TNotificationMessage {_params = p} -> do
         initialConfig <- LSP.getConfig
         -- What file should we use?
