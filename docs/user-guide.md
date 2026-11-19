@@ -26,6 +26,7 @@ Available options:
   --output-forsyde-ir-json Output file in ForSyDe-IR-JSON
   --output-procedural-ir   Output file in Procedural-IR
   --output-schedule        Output the SDF schedule to file instead of code
+  --output-forsyde-io      Output file in ForSyDeIO .fiodl format
   -t,--target TARGET       Target platform for C code. (PC default, PC and PICO2
                            supported)
   --input-type INPUTTYPE   Source of input tokens for the SDF models in the C
