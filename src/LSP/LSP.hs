@@ -10,7 +10,7 @@ module Main (main) where
 import Colog.Core ((<&))
 import qualified Colog.Core as L
 import Compiler.ForSyDeIR (IRSystem)
-import Compiler.Scheduler.SDFSchedule (Schedule (..))
+import Schedule (Schedule (..))
 import Control.Concurrent (forkFinally)
 import qualified Control.Exception as E
 import Control.Monad (forever, void)
@@ -37,8 +37,6 @@ import LSP.Uri (filePathToUriText, uriTextToFilePath)
 import Network.Socket
 import Options.Applicative
 import Prettyprinter
-import Schedule (Schedule (..), computeScheduleAndBuffers)
-import SKGraphSchema
 import System.IO
 import Visualiser.KLighD (forSyDeIRToGraph)
 

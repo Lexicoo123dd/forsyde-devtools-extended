@@ -11,7 +11,7 @@
 module Visualiser.KLighD (forSyDeIRToGraph) where
 
 import Compiler.ForSyDeIR
-import Compiler.Scheduler.SDFSchedule (Schedule (..))
+import Schedule.Common (Schedule (..))
 import Data.Function ((&))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)

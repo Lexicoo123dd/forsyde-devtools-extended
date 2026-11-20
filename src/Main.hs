@@ -1,7 +1,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
-import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments)
+import ArgumentsMain 
 import Compiler.CoreIR (prettyCoreProgram)
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.ForSyDeIR (IRSystem, prettyIRJSON, prettyIRSystem)
@@ -15,7 +15,8 @@ import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
 import Compiler.ProceduralIR (prettyProgram)
 import Compiler.ProceduralIRToC (translateProgram)
 import Options.Applicative
-import Compiler.Scheduler.SDFSchedule
+import Schedule
+import Schedule.Common
 import Control.Monad (unless, when)
 import Options.Applicative
 import Schedule
@@ -44,7 +45,6 @@ import System.FilePath
     takeFileName,
     (</>),
   )
-import Utilities (compileToCoreWithForSyDePath)
 
 {-
 

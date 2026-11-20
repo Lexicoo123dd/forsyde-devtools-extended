@@ -12,8 +12,8 @@ where
 
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
-import Compiler.Scheduler.SDFSchedule (Schedule, computeScheduleAndBuffers)
-import CoreIRToForSyDeIR (translateCoreProgram)
+import Schedule (Schedule, computeScheduleAndBuffers)
+import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Data.Data (Data, gmapT)
 import Data.Generics (extT)
 import GHC

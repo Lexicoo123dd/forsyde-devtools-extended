@@ -50,7 +50,7 @@ where
 import Data.List (elemIndex, find, mapAccumL, nub)
 import qualified Data.Map.Strict as Map
 import Data.Ratio (denominator, numerator)
-import ForSyDeIR
+import Compiler.ForSyDeIR
 import GHC.Generics (Generic)
 
 --------------------------------------------------------------------------------
@@ -114,6 +114,8 @@ pattern Schedule :: ([IRId], [(IRId, Int)], [(IRId, IRId)]) -> Schedule
 pattern Schedule tuple <- (toLegacyTuple -> tuple)
   where
     Schedule (s, b, d) = fromLegacyTuple s b d
+
+{-# COMPLETE Schedule #-}
 
 toLegacyTuple :: Schedule -> ([IRId], [(IRId, Int)], [(IRId, IRId)])
 toLegacyTuple s = (toFlatSchedule s, schedBufferSizes s, schedDelayBuffers s)

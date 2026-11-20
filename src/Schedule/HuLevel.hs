@@ -34,7 +34,7 @@ import Data.List (elemIndex, intercalate, partition, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Ord (comparing)
 import qualified Data.Vector as V
-import ForSyDeIR (IRId, IRSystem)
+import Compiler.ForSyDeIR (IRId, IRSystem)
 import GHC.Generics (Generic)
 import Schedule.Common
 

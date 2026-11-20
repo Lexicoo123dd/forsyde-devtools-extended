@@ -11,7 +11,7 @@ module Schedule.Greedy
 where
 
 import Data.List (intercalate)
-import ForSyDeIR (IRSystem)
+import Compiler.ForSyDeIR (IRSystem)
 import Schedule.Common
 
 -- | Greedy forced schedule simulation algorithm.

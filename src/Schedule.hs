@@ -24,7 +24,7 @@ module Schedule
   )
 where
 
-import ForSyDeIR (IRSystem)
+import Compiler.ForSyDeIR (IRSystem)
 import Schedule.Common
 import Schedule.Greedy
 import Schedule.HuLevel
