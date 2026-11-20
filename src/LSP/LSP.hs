@@ -10,7 +10,7 @@ module Main (main) where
 import Colog.Core ((<&))
 import qualified Colog.Core as L
 import Compiler.ForSyDeIR (IRSystem)
-import Compiler.Scheduler.SDFSchedule (Schedule (..))
+import Schedule (Schedule (..))
 import Control.Concurrent (forkFinally)
 import qualified Control.Exception as E
 import Control.Monad (forever, void)

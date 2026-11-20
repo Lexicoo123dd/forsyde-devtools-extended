@@ -5,7 +5,8 @@
 module VisualiserKLighDSpec (spec) where
 
 import Compiler.ForSyDeIR
-import Compiler.Scheduler.SDFSchedule (Schedule (..))
+import Schedule 
+-- import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)
 import Test.Hspec

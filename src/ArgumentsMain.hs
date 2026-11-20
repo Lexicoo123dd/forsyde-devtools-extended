@@ -1,6 +1,8 @@
 module ArgumentsMain where
 
+import Data.Char (toLower)
 import Options.Applicative
+import Schedule (SchedulingStrategy (..))
 
 -- Which file to use for input
 data Input
@@ -14,6 +16,7 @@ data Output
 data HasExtension
   = WithFileExtension
   | NoFileExtension
+  deriving (Show, Eq)
 
 -- Stubbed out this type for now, will probably not implement
 -- reading separate input formats
@@ -31,18 +34,28 @@ data OutputFormat
   | OutputForSyDeIRJSON
   | OutputProceduralIR
   | OutputSchedule
+  deriving (Show, Eq)
 
 data Target
   = PC
   | PICO2
+  deriving (Show, Eq)
 
 data InputType
   = StdIn
   | Predefined
+  deriving (Show, Eq)
 
 data Runs
   = Limited Int
   | Perpetual
+  deriving (Show, Eq)
+
+data SchedulePrint
+  = NoSchedulePrint
+  | SchedulePrintStdOut
+  | SchedulePrintFile FilePath
+  deriving (Show, Eq)
 
 data Arguments = Arguments
   { -- Files
@@ -56,7 +69,12 @@ data Arguments = Arguments
     iType :: InputType,
     runs :: Runs,
     -- Path to the package DB containing ForSyDe Shallow
-    forSyDePath :: Maybe FilePath
+    forSyDePath :: Maybe FilePath,
+    -- Scheduling strategy
+    scheduleStrategy :: SchedulingStrategy,
+    printSchedule :: SchedulePrint,
+    numCores :: Int,
+    benchmark :: Bool
   }
 
 -- Handle file input, always need to define a file
@@ -137,12 +155,12 @@ inputFormatProceduralIR =
 -- need to be active.
 outputFormatTop :: Parser OutputFormat
 outputFormatTop =
-  outputFormatC
+  outputFormatSchedule
     <|> outputFormatCore
     <|> outputFormatForSyDeIR
     <|> outputFormatForSyDeIRJSON
     <|> outputFormatProceduralIR
-    <|> outputFormatSchedule
+    <|> outputFormatC
 
 outputFormatC :: Parser OutputFormat
 outputFormatC =
@@ -150,7 +168,8 @@ outputFormatC =
     OutputC
     OutputC
     ( long "output-c"
-        <> help "Output file in C (default)"
+        <> long "output-c-mc"
+        <> help "Output file in C (default, handles both single-core and multi-core)"
     )
 
 outputFormatCore :: Parser OutputFormat
@@ -190,7 +209,11 @@ outputFormatSchedule =
   flag'
     OutputSchedule
     ( long "output-schedule"
-        <> help "Output the SDF schedule to file instead of code"
+        <> long "schedule"
+        <> long "output-schedule-mc"
+        <> long "schedule-mc"
+        <> long "output-mc-schedule"
+        <> help "Output the SDF schedule to file or stdout instead of code"
     )
 
 targetName :: ReadM Target
@@ -264,10 +287,83 @@ forSyDePathOption =
         <> help "The path to the ForSyDe Shallow package (unspecified by default)"
     )
 
--- Top level argument parsing function, takes 4 flags.
+data StrategyType
+  = StrategyGreedy
+  | StrategyHuLevel
+  deriving (Show, Eq)
+
+-- Flag for scheduling strategy: defaults to greedy.
+scheduleStrategyOption :: Parser StrategyType
+scheduleStrategyOption =
+  option
+    (str >>= parseStrategy)
+    ( long "scheduleStrategy"
+        <> long "schedule-strategy"
+        <> long "strategy"
+        <> metavar "STRATEGY"
+        <> value StrategyGreedy
+        <> help "Scheduling strategy to use: greedy (default), hu-level"
+    )
+  where
+    parseStrategy s = case map toLower s of
+      "greedy" -> pure StrategyGreedy
+      "hu-level" -> pure StrategyHuLevel
+      "hulevel" -> pure StrategyHuLevel
+      "hu" -> pure StrategyHuLevel
+      other -> readerError ("Unknown scheduling strategy '" ++ other ++ "'. Supported strategies: greedy, hu-level")
+
+-- Optional flag for schedule printing: defaults to stdout if -s or --print-schedule is given. Default when omitted is not to print (NoSchedulePrint).
+schedulePrintOption :: Parser SchedulePrint
+schedulePrintOption =
+  flag' SchedulePrintStdOut
+    ( short 's'
+        <> long "print-schedule"
+        <> long "print-schedule-stdout"
+        <> long "schedule-stdout"
+        <> help "Print the SDF schedule to stdout (default when -s or --print-schedule is specified)"
+    )
+    <|> option
+      ( str >>= \s -> case s of
+          "stdout" -> pure SchedulePrintStdOut
+          "-" -> pure SchedulePrintStdOut
+          f -> pure (SchedulePrintFile f)
+      )
+      ( long "print-schedule"
+          <> long "print-schedule-file"
+          <> long "schedule-file"
+          <> metavar "FILE"
+          <> help "Print schedule to a specified file (e.g. --print-schedule=FILE or --schedule-file FILE)"
+      )
+    <|> pure NoSchedulePrint
+
+-- Optional flag for number of cores: default is 2 cores.
+numCoresOption :: Parser Int
+numCoresOption =
+  option
+    auto
+    ( short 'c'
+        <> long "cores"
+        <> long "num-cores"
+        <> metavar "CORES"
+        <> value 2
+        <> showDefault
+        <> help "Number of cores to use for multi-core scheduling (default: 2)"
+    )
+
+-- Optional flag to include BENCH_START() and BENCH_END() timing hooks in generated C.
+benchmarkOption :: Parser Bool
+benchmarkOption =
+  switch
+    ( long "benchmark"
+        <> long "timing"
+        <> long "bench"
+        <> help "Include BENCH_START() and BENCH_END() timing hooks in generated C code (disabled by default)"
+    )
+
+-- Top level argument parsing function
 arguments :: Parser Arguments
 arguments =
-  Arguments
+  assembleArguments
     <$> inputFile
     <*> outputFileTop
     <*> outputFormatTop
@@ -275,3 +371,24 @@ arguments =
     <*> ioTop
     <*> runsTop
     <*> forSyDePathOption
+    <*> scheduleStrategyOption
+    <*> schedulePrintOption
+    <*> numCoresOption
+    <*> benchmarkOption
+  where
+    assembleArguments inF outF outFmt tgt io r pkg stratType printSched nCores bench =
+      Arguments
+        { input = inF,
+          output = outF,
+          output_format = outFmt,
+          target = tgt,
+          iType = io,
+          runs = r,
+          forSyDePath = pkg,
+          scheduleStrategy = case stratType of
+            StrategyGreedy -> Greedy
+            StrategyHuLevel -> HuLevel nCores,
+          printSchedule = printSched,
+          numCores = nCores,
+          benchmark = bench
+        }
