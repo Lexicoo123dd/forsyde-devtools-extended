@@ -13,7 +13,7 @@ import Compiler.ForSyDeIR (IRSystem)
 import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import Control.Concurrent (forkFinally)
 import qualified Control.Exception as E
-import Control.Monad (forever, void)
+import Control.Monad (forever, void, when)
 import Control.Monad.IO.Class
 import Data.Aeson ((.=))
 import qualified Data.Aeson as A
@@ -39,7 +39,8 @@ import Options.Applicative
 import Prettyprinter
 import System.IO
 import System.FilePath (equalFilePath)
-import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph, graphElementIdsForNames)
+import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraphWithOptions, graphElementIdsForNames)
+import Visualiser.Options
 
 diagramAcceptMethod :: LSP.SMethod (LSP.Method_CustomMethod "diagram/accept")
 diagramAcceptMethod = (LSP.SMethod_CustomMethod (Proxy @"diagram/accept"))
@@ -49,6 +50,9 @@ diagramOpenInTextEditor = (LSP.SMethod_CustomMethod (Proxy @"diagram/openInTextE
 
 sourceSelectionMethod :: LSP.SMethod (LSP.Method_CustomMethod "forsyde/sourceSelection")
 sourceSelectionMethod = LSP.SMethod_CustomMethod (Proxy @"forsyde/sourceSelection")
+
+setSynthesisOptionsMethod :: LSP.SMethod (LSP.Method_CustomMethod "keith/diagramOptions/setSynthesisOptions")
+setSynthesisOptionsMethod = LSP.SMethod_CustomMethod (Proxy @"keith/diagramOptions/setSynthesisOptions")
 
 setPreferencesMethod :: LSP.SMethod (LSP.Method_CustomMethod "keith/preferences/setPreferences")
 setPreferencesMethod = (LSP.SMethod_CustomMethod (Proxy @"keith/preferences/setPreferences"))
@@ -72,14 +76,14 @@ setSynthesis _clientId =
     ]
 
 -- | Send the supported options for the file
-updateOptions :: FilePath -> T.Text -> A.Value
-updateOptions f _clientId =
+updateOptions :: FilePath -> T.Text -> VisualiserOptions -> A.Value
+updateOptions f _clientId options =
   A.object
     [ "clientId" .= _clientId,
       "action"
         .= A.object
           [ "kind" .= ("updateOptions" :: T.Text),
-            "valuedSynthesisOptions" .= (Seq.empty :: Seq.Seq A.Object),
+            "valuedSynthesisOptions" .= valuedSynthesisOptions options,
             "layoutOptions" .= (Seq.empty :: Seq.Seq A.Object),
             "actions" .= (Seq.empty :: Seq.Seq A.Object),
             "modelUri" .= filePathToUriText f
@@ -87,15 +91,15 @@ updateOptions f _clientId =
     ]
 
 -- | Send the graph for layout and display to the LSP client (KLighD-VSCode)
-requestBounds :: FilePath -> T.Text -> IRSystem -> ScheduleStatus -> A.Value
-requestBounds f _clientId ir sched =
+requestBounds :: FilePath -> T.Text -> IRSystem -> ScheduleStatus -> VisualiserOptions -> A.Value
+requestBounds f _clientId ir sched options =
   A.object
     [ "clientId" .= _clientId,
       "action"
         .= A.object
           [ "kind" .= ("requestBounds" :: T.Text),
             "newRoot"
-              .= forSyDeIRToGraph f ir sched
+              .= forSyDeIRToGraphWithOptions f ir sched options
           ]
     ]
 
@@ -124,7 +128,8 @@ diagramOpenInTextEditorMessage uri sline scol eline ecol =
                       ]
                 ]
           ],
-      "forceOpen" .= False
+      -- KLighD otherwise ignores locations it cannot match to a visible editor.
+      "forceOpen" .= True
     ]
 
 recomputeModel :: LSP.LspT API.Config IO ()
@@ -202,6 +207,26 @@ handlers =
       LSP.notificationHandler LSP.SMethod_TextDocumentDidSave $ \_not -> do
         recomputeModel
         sendModel,
+      LSP.notificationHandler setSynthesisOptionsMethod $ \LSP.TNotificationMessage {_params = p} -> do
+        config <- LSP.getConfig
+        let sourceFile = getKey "uri" p >>= \case
+              A.String uri -> uriTextToFilePath uri
+              _ -> Nothing
+        -- Apply KLighD's changed values only to the model currently displayed.
+        case (sourceFile, file config) of
+          (Just selectedFile, Just modelFile) | equalFilePath selectedFile modelFile -> do
+            let old = visualiserOptions config
+            let new = applySynthesisOptions p old
+            when (new /= old) $ do
+              LSP.setConfig config {visualiserOptions = new}
+              when (sourceToDiagram old && not (sourceToDiagram new)) $
+                case clientId config of
+                  Just diagramId -> LSP.sendNotification diagramAcceptMethod $ A.object
+                    ["clientId" .= diagramId, "action" .= A.object ["kind" .= ("allSelected" :: T.Text), "select" .= False]]
+                  Nothing -> pure ()
+              -- Navigation switches do not need to rebuild or relayout the graph.
+              when (showFiringOrder old /= showFiringOrder new) sendModel
+          _ -> pure (),
       LSP.notificationHandler sourceSelectionMethod $ \LSP.TNotificationMessage {_params = p} -> do
         config <- LSP.getConfig
         let sourceFile = getKey "uri" p >>= \case
@@ -213,7 +238,7 @@ handlers =
         -- The current server configuration owns one diagram; ignore other documents.
         case (sourceFile, names, file config, clientId config, system config) of
           (Just selectedFile, Just selectedNames, Just modelFile, Just diagramId, Just ir)
-            | equalFilePath selectedFile modelFile -> do
+            | sourceToDiagram (visualiserOptions config) && equalFilePath selectedFile modelFile -> do
                 LSP.sendNotification diagramAcceptMethod $ A.object
                   ["clientId" .= diagramId, "action" .= A.object ["kind" .= ("allSelected" :: T.Text), "select" .= False]]
                 LSP.sendNotification diagramAcceptMethod $ A.object
@@ -246,7 +271,7 @@ handlers =
         -- Get location information on selected object
         config <- LSP.getConfig
         let sel = getSelected p & map (T.split (\_c -> _c == '$')) & map last & map T.unpack
-        let spans = API.getSelectedSpans sel config
+        let spans = if diagramToSource (visualiserOptions config) then API.getSelectedSpans sel config else []
         if length spans > 0
           then liftIO $ stderrLogger <& ("Selected: " <> T.show spans) `L.WithSeverity` L.Debug
           else pure ()
@@ -265,12 +290,12 @@ handlers =
   where
     sendModel :: LSP.LspT API.Config IO ()
     sendModel = do
-      config@API.Config {file = f, clientId = c, system = s, schedule = curSched} <- LSP.getConfig
+      config@API.Config {file = f, clientId = c, system = s, schedule = curSched, visualiserOptions = options} <- LSP.getConfig
       case (f, c, s) of
         (Just curFile, Just curId, Just curSystem) ->
           LSP.sendNotification diagramAcceptMethod (setSynthesis curId)
-            >> LSP.sendNotification diagramAcceptMethod (updateOptions curFile curId)
-            >> LSP.sendNotification diagramAcceptMethod (requestBounds curFile curId curSystem (toScheduleStatus curSched))
+            >> LSP.sendNotification diagramAcceptMethod (updateOptions curFile curId options)
+            >> LSP.sendNotification diagramAcceptMethod (requestBounds curFile curId curSystem (toScheduleStatus curSched) options)
         _ -> dualLogger <& ("does not have enough information to send diagram: " <> T.show config) `L.WithSeverity` L.Error
     getKey key = \case
       A.Object o -> o !? key
@@ -370,7 +395,7 @@ run (Arguments comm (Host ip) (TCP p) i_f pkgPath) =
       case result of
         Left err -> error (show err)
         Right CompileResult{resultIR = forsydeIR, resultSchedule = sched} -> do
-          let graphMessage = requestBounds f "sprotty" forsydeIR (toScheduleStatus (Just sched))
+          let graphMessage = requestBounds f "sprotty" forsydeIR (toScheduleStatus (Just sched)) defaultVisualiserOptions
           BSL8.putStrLn $ AP.encodePretty graphMessage
   where
     serverDef =

@@ -53,6 +53,7 @@ library
     LSP.Uri
     Utilities
     Visualiser.SKGraphSchema
+    Visualiser.Options
     Visualiser.KLighD
 
 library examples
@@ -102,6 +103,7 @@ executable forsyde-lsp-exe
     LSP.Arguments
     LSP.Uri
     Visualiser.SKGraphSchema
+    Visualiser.Options
     Visualiser.KLighD
     Utilities
 
