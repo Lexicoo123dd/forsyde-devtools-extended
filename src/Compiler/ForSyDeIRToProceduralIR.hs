@@ -4,7 +4,7 @@ import ArgumentsMain (InputType (Predefined, StdIn), Runs (Limited, Perpetual))
 import Compiler.CoreIRToProceduralIR (translateIRFunction)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
-import Compiler.Types (cFormatSpecifier, cUnionField, literalFormatSpecifier)
+import Compiler.Types (cFormatSpecifier, cUnionField, literalFormatSpecifier, translateLiteral)
 import GHC hiding (targetId)
 
 -- | The `TranslationContext` is a data type which is used to pass around
@@ -198,7 +198,20 @@ translateIRConstructor initialContext constructor = case constructor of
                         if elem bufferId (systemOutputs initialContext)
                           -- TODO: Match the output with the actor on the signal
                           then SExpr (ECall "printf" [EString (irLiteralToFormat token), irLiteralToExpression token])
-                          else SExpr (ECall "write_token" [EVar $ show bufferId, irLiteralToExpression token])
+                          else
+                            SExpr
+                              ( ECall
+                                  "write_token"
+                                  [ EVar $ show bufferId,
+                                    EVar
+                                      ( "(token){."
+                                          ++ translateIRTypeToUnionField (getSignalType initialContext outputSignal)
+                                          ++ " = "
+                                          ++ translateLiteral token
+                                          ++ "}"
+                                      )
+                                  ]
+                              )
                    in (stmt : acc)
                 delayStmts = (foldl' foldDelayTokens [] tokens)
              in initialContext {initDelay = delayStmts ++ initDelay initialContext}
