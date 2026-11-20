@@ -140,10 +140,10 @@ run args = do
       let isMultiCore = length (schedCores schedule) > 1
       let effectiveInputType = if isMultiCore then Predefined else inputType
       let isBench = benchmark args
+      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r isBench forsydeIR
+      let c = translateProgram proceduralIR t effectiveInputType True
       case output_file of
         StdOut -> do
-          let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r isBench forsydeIR
-          let c = translateProgram proceduralIR t effectiveInputType True
           putStr c
         _ -> do
           let (targetDir, cFilePath) = resolveCOutput input_file output_file
@@ -154,8 +154,6 @@ run args = do
             unless headerExists $
               writeFile inputHeaderPath (generateInputHeader forsydeIR schedule)
           setupIncludeSymlink targetDir
-          let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r isBench forsydeIR
-          let c = translateProgram proceduralIR t effectiveInputType True
           writeFile cFilePath c
 
     OutputCore ->
