@@ -12,14 +12,14 @@ simpleIRSystem =
   IRSystem
     ([IRString "input"], [IRString "output"])
     [ IRActor (IRString "actor_1") Actor22 (IRString "add") ([IRString "s_in", IRString "s_2"], [IRString "s_out", IRString "s_1"]),
-      IRDelay (IRString "delay_1") [0] (IRString "s_1", IRString "s_2")
+      IRDelay (IRString "delay_1") [LInt 0] (IRString "s_1", IRString "s_2")
     ]
-    [ IRSignal (IRString "s_in") (IRString "input", 1) (IRString "actor_1", 1),
-      IRSignal (IRString "s_1") (IRString "actor_1", 1) (IRString "delay_1", 1),
-      IRSignal (IRString "s_2") (IRString "delay_1", 1) (IRString "actor_1", 1),
-      IRSignal (IRString "s_out") (IRString "actor_1", 1) (IRString "output", 1)
+    [ IRSignal (IRString "s_in") TInt (IRString "input", 1) (IRString "actor_1", 1),
+      IRSignal (IRString "s_1") TInt (IRString "actor_1", 1) (IRString "delay_1", 1),
+      IRSignal (IRString "s_2") TInt (IRString "delay_1", 1) (IRString "actor_1", 1),
+      IRSignal (IRString "s_out") TInt (IRString "actor_1", 1) (IRString "output", 1)
     ]
-    [ IRFunction (IRString "add") Nothing
+    [ IRFunction (IRString "add") Nothing ([TInt], [TInt])
     ]
 
 customDflags :: IO DynFlags
