@@ -4,7 +4,7 @@ module Main where
 import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments)
 import Compiler.CoreIR (prettyCoreProgram)
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
-import Compiler.ForSyDeIR (prettyIRJSON, prettyIRSystem)
+import Compiler.ForSyDeIR (IRSystem, prettyIRJSON, prettyIRSystem)
 import Control.Exception (IOException, catch)
 import Control.Monad (unless, when)
 import Compiler.ForSyDeIRToProceduralIR
@@ -146,14 +146,7 @@ run args = do
         StdOut -> do
           putStr c
         _ -> do
-          let (targetDir, cFilePath) = resolveCOutput input_file output_file
-          createDirectoryIfMissing True targetDir
-          when (isMultiCore || effectiveInputType == Predefined) $ do
-            let inputHeaderPath = targetDir </> "input.h"
-            headerExists <- doesFileExist inputHeaderPath
-            unless headerExists $
-              writeFile inputHeaderPath (generateInputHeader forsydeIR schedule)
-          setupIncludeSymlink targetDir
+          cFilePath <- setupCOutput input_file output_file isMultiCore effectiveInputType forsydeIR schedule
           writeFile cFilePath c
 
     OutputCore ->
@@ -182,6 +175,20 @@ main = run =<< execParser opts
             <> progDesc "Compile a ForSyDe model"
             <> header "ForSyDe DevTools"
         )
+
+-- | Sets up the C output directory: creates the directory, writes input.h
+-- if needed, configures the include symlink, and returns the path to the C file.
+setupCOutput :: FilePath -> Output -> Bool -> InputType -> IRSystem -> Schedule -> IO FilePath
+setupCOutput inputPath outputVal isMultiCore effectiveInputType forsydeIR schedule = do
+  let (targetDir, cFilePath) = resolveCOutput inputPath outputVal
+  createDirectoryIfMissing True targetDir
+  when (isMultiCore || effectiveInputType == Predefined) $ do
+    let inputHeaderPath = targetDir </> "input.h"
+    headerExists <- doesFileExist inputHeaderPath
+    unless headerExists $
+      writeFile inputHeaderPath (generateInputHeader forsydeIR schedule)
+  setupIncludeSymlink targetDir
+  pure cFilePath
 
 -- | Resolves the target output directory and C source file path based on the input model
 -- and the requested output path.
