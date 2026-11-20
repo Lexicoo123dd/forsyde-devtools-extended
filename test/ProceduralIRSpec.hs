@@ -1,6 +1,7 @@
 module ProceduralIRSpec (spec) where
 
 import Compiler.ProceduralIR
+import Compiler.Types
 import Data.Char (isSpace)
 import Test.Hspec
 
@@ -9,58 +10,59 @@ exampleProceduralIR =
   Prog
     [ GFuncDef
         Nothing
-        TInt
+        (TData TInt)
         "main"
         []
+        ([], [])
         ( SScope
             [ SVarDecl (TIdent "token") "input",
               SVarDecl (TIdent "token") "output",
-              SVarDecl TInt "i",
-              SVarDecl TInt "j",
+              SVarDecl (TData TInt) "i",
+              SVarDecl (TData TInt) "j",
               SVarDef
                 (TPointer (TIdent "channel"))
                 "s_in"
                 ( ECall
                     "create_buffer_nonblocking"
-                    ([EInt 4])
+                    ([ELit (LInt 4)])
                 ),
               SVarDef
                 (TPointer (TIdent "channel"))
                 "s_out"
                 ( ECall
                     "create_buffer_nonblocking"
-                    ([EInt 2])
+                    ([ELit (LInt 2)])
                 ),
               SVarDef
                 (TPointer (TIdent "channel"))
                 "s_1"
                 ( ECall
                     "create_buffer_nonblocking"
-                    ([EInt 1])
+                    ([ELit (LInt 1)])
                 ),
               SVarDef
                 (TPointer (TIdent "channel"))
                 "s_1_delay"
                 ( ECall
                     "create_buffer_nonblocking"
-                    ([EInt 1])
+                    ([ELit (LInt 1)])
                 ),
               SExpr
                 ( ECall
                     "writeToken"
                     ( [ EVar "s_1",
-                        EInt 0
+                        ELit (LInt 0)
                       ]
                     )
                 ),
               SWhile
-                (EInt 1)
+                (ELit (LInt 1))
                 ( SScope
                     [ SExpr
                         ( ECall
                             "actor11SDF"
-                            [ EInt 2,
-                              EInt 1,
+                            [ ELit (LInt 2),
+                              ELit (LInt 1),
                               EVar "s_in",
                               EVar "s_1",
                               EVar "f_1"
@@ -68,20 +70,20 @@ exampleProceduralIR =
                         )
                     ]
                 ),
-              SArrayAssign "x" (EInt 0) Nothing (EInt 3),
-              SArrayAssign "x" (EInt 1) (Just "foo") (EInt 2),
+              SArrayAssign "x" (ELit (LInt 0)) Nothing (ELit (LInt 3)),
+              SArrayAssign "x" (ELit (LInt 1)) (Just "foo") (ELit (LInt 2)),
               SIf
                 (EBinOp Less (EVar "i") (EVar "n"))
                 (SReturn Nothing)
                 Nothing,
               SIf
-                (EBinOp Greater (EVar "i") (EInt 0))
-                (SReturn (Just (EInt 1)))
-                (Just (SReturn (Just (EInt 0)))),
-              SReturn (Just (EInt 0)),
+                (EBinOp Greater (EVar "i") (ELit (LInt 0)))
+                (SReturn (Just (ELit (LInt 1))))
+                (Just (SReturn (Just (ELit (LInt 0))))),
+              SReturn (Just (ELit (LInt 0))),
               SReturn Nothing,
               SFor
-                (SVarDef TInt "i" (EInt 0))
+                (SVarDef (TData TInt) "i" (ELit (LInt 0)))
                 (EBinOp Less (EVar "i") (EVar "n"))
                 (SExpr (EUnOp Increment (EVar "i")))
                 (SScope [SExpr (ECall "printf" [EString "%d\n", EVar "i"])]),
@@ -112,24 +114,24 @@ exampleProceduralIR =
                     ]
                 ),
               SVarDef
-                TInt
+                (TData TInt)
                 "value"
                 (EDereference (EVar "p")),
               SAssign
                 (EDereference (EVar "p"))
-                (EInt 10),
+                (ELit (LInt 10)),
               SArrayDecl
-                TInt
+                (TData TInt)
                 "input"
-                [EInt 2]
+                [ELit (LInt 2)]
             ]
         ),
       GFuncDef
         (Just Static)
         TVoid
         "actor11SDF"
-        [ (TInt, "consum"),
-          (TInt, "prod"),
+        [ ((TData TInt), "consum"),
+          ((TData TInt), "prod"),
           (TPointer (TIdent "channel"), "ch_in"),
           (TPointer (TIdent "channel"), "ch_out"),
           ( TFunctionPointer
@@ -140,6 +142,7 @@ exampleProceduralIR =
             "f"
           )
         ]
+        ([TInt], [TInt])
         (SScope [])
     ]
 

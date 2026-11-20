@@ -23,7 +23,7 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
       -- 3. Actors that receive from inputs
       inputActorNames =
         [ dstId
-        | IRSignal _ (srcId, _) (dstId, _) <- signals,
+        | IRSignal _ _ (srcId, _) (dstId, _) <- signals,
           srcId `elem` inputNames
         ]
 
@@ -42,14 +42,14 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
       -- Non-delay, non-input/output signals
       normalSigs = filter f signals
         where
-          f (IRSignal _ (srcId, _) (dstId, _)) =
+          f (IRSignal _ _ (srcId, _) (dstId, _)) =
             srcId `notElem` inputNames
               && dstId `notElem` outputNames
               && srcId `notElem` delayNames
               && dstId `notElem` delayNames
 
       makeNormalEdges
-        (IRSignal signalId (srcId, prodRate) (dstId, consRate)) = do
+        (IRSignal signalId _ (srcId, prodRate) (dstId, consRate)) = do
           srcActor <- findActorByName srcId
           dstActor <- findActorByName dstId
           pure $ Edge signalId srcActor dstActor prodRate consRate False 0 Nothing
@@ -61,12 +61,12 @@ convertIRSystem (IRSystem (inputNames, outputNames) constructors signals _) = do
                 (_, a) -> a
             incoming =
               [ (signalId, srcId, prodRate)
-              | IRSignal signalId (srcId, prodRate) (dstId, _) <- signals,
+              | IRSignal signalId _ (srcId, prodRate) (dstId, _) <- signals,
                 dstId == delayName
               ]
             outgoing =
               [ (signalId, dstId, consRate)
-              | IRSignal signalId (srcId, _) (dstId, consRate) <- signals,
+              | IRSignal signalId _ (srcId, _) (dstId, consRate) <- signals,
                 srcId == delayName
               ]
          in case (incoming, outgoing) of
@@ -430,12 +430,12 @@ simulateBufferUsage actors edges initialTokens schedule =
 computeIOBufferSizes :: IRSystem -> [(IRId, Int)] -> Either String ([(IRId, Int)], [(IRId, IRId)])
 computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWithNames =
   let -- Find all external input edges
-      inputSignals = [s | s@(IRSignal _ (srcId, _) (_, _)) <- signals, srcId `elem` inputs]
+      inputSignals = [s | s@(IRSignal _ _ (srcId, _) (_, _)) <- signals, srcId `elem` inputs]
       inputEdges = foldr f (Right []) $ map nonDelayInputSignal inputSignals
         where
           f el acc = do
             a <- acc
-            (IRSignal signalId (srcId, _) (dstId, dstRate), aliases, nTokens) <- el
+            (IRSignal signalId _ (srcId, _) (dstId, dstRate), aliases, nTokens) <- el
             if srcId `elem` inputs
               then do
                 dstReps <- findActorRep dstId
@@ -443,26 +443,32 @@ computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWit
               else acc
 
       -- Find the first non-delay process connected to the input signal
-      nonDelayInputSignal s@(IRSignal sigId (srcId, srcRate) (dstId, _)) =
+      nonDelayInputSignal s@(IRSignal sigId signalType (srcId, srcRate) (dstId, _)) =
         case find (\c -> constructorName c == dstId) constructors of
           -- The signal directly connects to an actor
           Just (IRActor _ _ _ _) -> pure (s, [], 0)
           -- The signal connects to a delay, keep going
           Just (IRDelay dName tokens (_, next)) | dstId == dName ->
-            case find (\(IRSignal sId _ _) -> sId == next) signals of
-              Just (IRSignal sigAlias (_, _) (newDstId, newDstRate)) -> do
-                (sig, aliases, nTokens) <- nonDelayInputSignal (IRSignal sigId (srcId, srcRate) (newDstId, newDstRate))
-                pure (sig, (sigId, sigId) : (sigAlias, sigId) : aliases, nTokens + length tokens)
+            case find (\(IRSignal sId _ _ _) -> sId == next) signals of
+              Just (IRSignal sigAlias _ _ (newDstId, newDstRate)) -> do
+                (sig, aliases, nTokens) <-
+                  nonDelayInputSignal
+                    (IRSignal sigId signalType (srcId, srcRate) (newDstId, newDstRate))
+                pure
+                  ( sig,
+                    (sigId, sigId) : (sigAlias, sigId) : aliases,
+                    nTokens + length tokens
+                  )
               Nothing -> Left $ "Could not find next signal " ++ show next
           _ -> Left $ "Could not find the process " ++ show srcId
 
       -- Find all external output edges
-      outputSignals = [s | s@(IRSignal _ (_, _) (dstId, _)) <- signals, dstId `elem` outputs]
+      outputSignals = [s | s@(IRSignal _ _ (_, _) (dstId, _)) <- signals, dstId `elem` outputs]
       outputEdges = foldr f (Right []) $ map nonDelayOutputSignal outputSignals
         where
           f el acc = do
             a <- acc
-            (IRSignal signalId (srcId, srcRate) (dstId, _), aliases, nTokens) <- el
+            (IRSignal signalId _ (srcId, srcRate) (dstId, _), aliases, nTokens) <- el
             if dstId `elem` outputs
               then do
                 srcReps <- findActorRep srcId
@@ -470,16 +476,22 @@ computeIOBufferSizes (IRSystem (inputs, outputs) constructors signals _) repsWit
               else acc
 
       -- Find the first non-delay process connected to the output signal
-      nonDelayOutputSignal s@(IRSignal sigId (srcId, _) (dstId, dstRate)) =
+      nonDelayOutputSignal s@(IRSignal sigId signalType (srcId, _) (dstId, dstRate)) =
         case find (\c -> constructorName c == srcId) constructors of
           -- The signal directly connects to an actor
           Just (IRActor _ _ _ _) -> pure (s, [], 0)
           -- The signal connects to a delay, keep going
           Just (IRDelay dName tokens (next, _)) | srcId == dName ->
-            case find (\(IRSignal sId _ _) -> sId == next) signals of
-              Just (IRSignal sigAlias (newSrcId, newSrcRate) (_, _)) -> do
-                (sig, aliases, nTokens) <- nonDelayOutputSignal (IRSignal sigId (newSrcId, newSrcRate) (dstId, dstRate))
-                pure (sig, (sigId, sigId) : (sigAlias, sigId) : aliases, nTokens + length tokens)
+            case find (\(IRSignal sId _ _ _) -> sId == next) signals of
+              Just (IRSignal sigAlias _ (newSrcId, newSrcRate) _) -> do
+                (sig, aliases, nTokens) <-
+                  nonDelayOutputSignal
+                    (IRSignal sigId signalType (newSrcId, newSrcRate) (dstId, dstRate))
+                pure
+                  ( sig,
+                    (sigId, sigId) : (sigAlias, sigId) : aliases,
+                    nTokens + length tokens
+                  )
               Nothing -> Left $ "Could not find next signal " ++ show next
           _ -> Left $ "Could not find the process " ++ show srcId
 

@@ -16,6 +16,8 @@ module Compiler.CoreIRToForSyDeIR.Signal (createSignalsFromArguments, updateCons
 
 import Compiler.CoreIRToForSyDeIR.Context
 import Compiler.ForSyDeIR
+import Compiler.Types (typeOfLiteral)
+import Control.Monad (foldM)
 
 -- | Creates signals based on the arguments of a process constructor. All
 -- signals created with this function have the process constructor as the
@@ -35,7 +37,7 @@ createSignalsFromArguments context pcId arguments =
       case getSourceFromArgument currentContext argument of
         Left e -> Left e
         Right (sourceId, sourceRate) ->
-          let newSignal = IRSignal argument (sourceId, sourceRate) (pcId, rate)
+          let newSignal = IRSignal argument TUnknown (sourceId, sourceRate) (pcId, rate)
               newSignals = (argument, newSignal) : (signals currentContext)
               context1 = currentContext {signals = newSignals}
            in pure $ updateConstructorsInputs context1 pcId argument
@@ -96,10 +98,45 @@ updateConstructorsAndSignals :: TranslationContext -> Either String TranslationC
 updateConstructorsAndSignals initialContext = do
   let initialSignals = map snd (signals initialContext)
   (context1, sigs) <- foldl' aux (pure (initialContext, [])) initialSignals
-  pure context1 {signals = sigs}
+  let finalContext = context1 {signals = sigs}
+
+  let actorFunctions =
+        [ (actor, function)
+        | (_, actor@(IRActor _ _ functionId _)) <- constructors finalContext,
+          Just function <- [lookup functionId (functions finalContext)]
+        ]
+  let connections =
+        [ (inputSignals, outputSignals, inputTypes, outputTypes)
+        | ( IRActor _ _ _ (inputSignals, outputSignals),
+            IRFunction _ _ (inputTypes, outputTypes)
+            ) <-
+            actorFunctions
+        ]
+  let typedInputs =
+        [ zip inputSignals inputTypes
+        | (inputSignals, _, inputTypes, _) <- connections
+        ]
+
+  let typedOutputs =
+        [ zip outputSignals outputTypes
+        | (_, outputSignals, _, outputTypes) <- connections
+        ]
+  let allTypedConnections = concat typedInputs ++ concat typedOutputs
+
+  let updatedSignals =
+        [ case lookup signalId allTypedConnections of
+            Just signalType ->
+              (signalId, IRSignal signalId signalType source target)
+            Nothing ->
+              (signalId, IRSignal signalId TUnknown source target)
+        | (signalId, IRSignal _ _ source target) <- signals finalContext
+        ]
+
+  finalContext' <- validateDelaySignal (finalContext {signals = updatedSignals})
+  pure finalContext'
   where
     aux :: Either String (TranslationContext, [(IRId, IRSignal)]) -> IRSignal -> Either String (TranslationContext, [(IRId, IRSignal)])
-    aux acc' currentSignal@(IRSignal signalId (sourceId, sourceRate) (targetId, targetRate)) = do
+    aux acc' currentSignal@(IRSignal signalId _ (sourceId, sourceRate) (targetId, targetRate)) = do
       (currentContext, acc) <- acc'
       let maybebinder = lookup sourceId (binders currentContext)
        in case maybebinder of
@@ -110,7 +147,7 @@ updateConstructorsAndSignals initialContext = do
                 case (lookup pcId (pcRates currentContext)) of
                   Nothing -> Left ("updateConstructorsAndSignals - No rates found for process constructor: " ++ show pcId)
                   Just (_, outRates) -> do
-                    let newSig = IRSignal signalId (pcId, outRates !! sourceRate) (targetId, targetRate)
+                    let newSig = IRSignal signalId TUnknown (pcId, outRates !! sourceRate) (targetId, targetRate)
                     context1 <- updateConstructorsOutputs currentContext signalId pcId sourceRate
                     pure (context1, (signalId, newSig) : acc)
               _ -> Left ("updateConstructorsAndSignals - Binder is not associated with any process constructors")
@@ -119,6 +156,77 @@ updateConstructorsAndSignals initialContext = do
               -- only had 1 output, thus passing index zero
               context1 <- updateConstructorsOutputs currentContext signalId sourceId 0
               pure (context1, (signalId, currentSignal) : acc)
+
+-- Helper function for udpateConstructrsAndSignals.
+-- If a delay is direclty connected to a input or output signal then the type cant be found
+-- and is just assigned "TUnknown". To fix this just check if the other connection to the delay
+-- has a type and assign that type. If neither signal connected to the delay has a type then the program crashes...
+-- Should be fixed.
+--
+-- Also, delay token list is typed checked. So a list [1,1.5, ...] is not valid. It looks at the connected
+-- signals and checks if they are the same type and then verifies that all tokens in the list is of this type!
+validateDelaySignal :: TranslationContext -> Either String TranslationContext
+validateDelaySignal context = do
+  updatedSignals <- foldM updateDelay (signals context) (constructors context)
+  pure context {signals = updatedSignals}
+  where
+    updateDelay currentSignals (_, IRDelay delayId tokens (inputSignal, outputSignal)) =
+      case (lookup inputSignal currentSignals, lookup outputSignal currentSignals) of
+        (Nothing, _) ->
+          Left $ "Delay " ++ show delayId ++ ": input signal not found"
+        (_, Nothing) ->
+          Left $ "Delay " ++ show delayId ++ ": output signal not found"
+        (Just input, Just output) ->
+          case (getSignalType input, getSignalType output) of
+            (TUnknown, TUnknown) ->
+              Left $ "Delay " ++ show delayId ++ ": cannot determine type because both input and output signals are TUnknown"
+            (TUnknown, outputType) ->
+              validateTokens delayId tokens outputType
+                >> Right (updateSignalType inputSignal outputType currentSignals)
+            (inputType, TUnknown) ->
+              validateTokens delayId tokens inputType
+                >> Right (updateSignalType outputSignal inputType currentSignals)
+            (inputType, outputType)
+              | inputType == outputType ->
+                  validateTokens delayId tokens inputType
+                    >> Right currentSignals
+              | otherwise ->
+                  Left $
+                    "Delay "
+                      ++ show delayId
+                      ++ ": signal type mismatch: "
+                      ++ show inputType
+                      ++ " /= "
+                      ++ show outputType
+    updateDelay currentSignals _ = Right currentSignals
+
+    getSignalType (IRSignal _ signalType _ _) = signalType
+
+    validateTokens delayId tokens expectedType =
+      mapM_ validateToken tokens
+      where
+        validateToken token
+          | typeOfLiteral token == expectedType = Right ()
+          | otherwise =
+              Left $
+                "Delay "
+                  ++ show delayId
+                  ++ ": token "
+                  ++ show token
+                  ++ " has type "
+                  ++ show (typeOfLiteral token)
+                  ++ ", expected "
+                  ++ show expectedType
+
+    updateSignalType signalId newType =
+      map
+        ( \(sid, signal@(IRSignal name _ source target)) ->
+            if sid == signalId
+              then (sid, IRSignal name newType source target)
+              else (sid, signal)
+        )
+
+-- Resolve the signal type from its delay connection
 
 -- | Helper function for `createSignalsFromArguments` which returns the id and
 -- rate for the source of a signal based on an argument.

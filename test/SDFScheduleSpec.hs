@@ -13,14 +13,14 @@ exampleSystem1 =
   IRSystem
     ([IRString "input"], [IRString "output"])
     [ IRActor (IRString "actor_1") Actor22 (IRString "add") ([IRString "s_in", IRString "s_2"], [IRString "s_out", IRString "s_1"]),
-      IRDelay (IRString "delay_1") [0] (IRString "s_1", IRString "s_2")
+      IRDelay (IRString "delay_1") [LInt 0] (IRString "s_1", IRString "s_2")
     ]
-    [ IRSignal (IRString "s_in") (IRString "input", 1) (IRString "actor_1", 1),
-      IRSignal (IRString "s_1") (IRString "actor_1", 1) (IRString "delay_1", 1),
-      IRSignal (IRString "s_2") (IRString "delay_1", 1) (IRString "actor_1", 1),
-      IRSignal (IRString "s_out") (IRString "actor_1", 1) (IRString "output", 1)
+    [ IRSignal (IRString "s_in") TInt (IRString "input", 1) (IRString "actor_1", 1),
+      IRSignal (IRString "s_1") TInt (IRString "actor_1", 1) (IRString "delay_1", 1),
+      IRSignal (IRString "s_2") TInt (IRString "delay_1", 1) (IRString "actor_1", 1),
+      IRSignal (IRString "s_out") TInt (IRString "actor_1", 1) (IRString "output", 1)
     ]
-    [ IRFunction (IRString "add") Nothing
+    [ IRFunction (IRString "add") Nothing ([TInt], [TInt])
     ]
 
 -- System with single actor and nothing else
@@ -30,10 +30,10 @@ exampleSystem2 =
     ([IRString "in"], [IRString "out"])
     [ IRActor (IRString "actor") Actor11 (IRString "add") ([IRString "s_in"], [IRString "s_out"])
     ]
-    [ IRSignal (IRString "s_in") (IRString "in", 1) (IRString "actor", 1),
-      IRSignal (IRString "s_out") (IRString "actor", 1) (IRString "out", 1)
+    [ IRSignal (IRString "s_in") TInt (IRString "in", 1) (IRString "actor", 1),
+      IRSignal (IRString "s_out") TInt (IRString "actor", 1) (IRString "out", 1)
     ]
-    [ IRFunction (IRString "add") Nothing
+    [ IRFunction (IRString "add") Nothing ([TInt], [TInt])
     ]
 
 -- System with two actors, one self loop
@@ -42,16 +42,16 @@ exampleSystem3 =
   IRSystem
     ([IRString "input"], [IRString "output"])
     [ IRActor (IRString "actor_1") Actor22 (IRString "add") ([IRString "s_in", IRString "s_2"], [IRString "s_1", IRString "s_3"]),
-      IRDelay (IRString "delay_1") [0] (IRString "s_1", IRString "s_2"),
+      IRDelay (IRString "delay_1") [LInt 0] (IRString "s_1", IRString "s_2"),
       IRActor (IRString "actor_2") Actor11 (IRString "add") ([IRString "s_3"], [IRString "s_out"])
     ]
-    [ IRSignal (IRString "s_in") (IRString "input", 1) (IRString "actor_1", 1),
-      IRSignal (IRString "s_1") (IRString "actor_1", 1) (IRString "delay_1", 1),
-      IRSignal (IRString "s_2") (IRString "delay_1", 1) (IRString "actor_1", 1),
-      IRSignal (IRString "s_3") (IRString "actor_1", 1) (IRString "actor_2", 1),
-      IRSignal (IRString "s_out") (IRString "actor_2", 1) (IRString "output", 1)
+    [ IRSignal (IRString "s_in") TInt (IRString "input", 1) (IRString "actor_1", 1),
+      IRSignal (IRString "s_1") TInt (IRString "actor_1", 1) (IRString "delay_1", 1),
+      IRSignal (IRString "s_2") TInt (IRString "delay_1", 1) (IRString "actor_1", 1),
+      IRSignal (IRString "s_3") TInt (IRString "actor_1", 1) (IRString "actor_2", 1),
+      IRSignal (IRString "s_out") TInt (IRString "actor_2", 1) (IRString "output", 1)
     ]
-    [ IRFunction (IRString "add") Nothing
+    [ IRFunction (IRString "add") Nothing ([TInt], [TInt])
     ]
 
 -- System with multiple inputs
@@ -63,18 +63,18 @@ exampleSystem4 =
       IRActor (IRString "actor_b") Actor11 (IRString "add") ([IRString "s_inb"], [IRString "s_2"]),
       IRActor (IRString "actor_c") Actor21 (IRString "add") ([IRString "s_1", IRString "s_4"], [IRString "s_3"]),
       IRActor (IRString "actor_d") Actor22 (IRString "add") ([IRString "s_2", IRString "s_3"], [IRString "s_4_delay", IRString "s_out"]),
-      IRDelay (IRString "delay") [0] (IRString "s_4_delay", IRString "s_4")
+      IRDelay (IRString "delay") [LInt 0] (IRString "s_4_delay", IRString "s_4")
     ]
-    [ IRSignal (IRString "s_ina") (IRString "s_ina", 1) (IRString "actor_a", 2),
-      IRSignal (IRString "s_inb") (IRString "s_inb", 1) (IRString "actor_b", 1),
-      IRSignal (IRString "s_1") (IRString "actor_a", 1) (IRString "actor_c", 2),
-      IRSignal (IRString "s_2") (IRString "actor_b", 2) (IRString "actor_d", 2),
-      IRSignal (IRString "s_3") (IRString "actor_c", 1) (IRString "actor_d", 1),
-      IRSignal (IRString "s_4_delay") (IRString "actor_d", 1) (IRString "delay", 1),
-      IRSignal (IRString "s_4") (IRString "delay", 1) (IRString "actor_c", 1),
-      IRSignal (IRString "s_out") (IRString "actor_d", 2) (IRString "s_out", 1)
+    [ IRSignal (IRString "s_ina") TInt (IRString "s_ina", 1) (IRString "actor_a", 2),
+      IRSignal (IRString "s_inb") TInt (IRString "s_inb", 1) (IRString "actor_b", 1),
+      IRSignal (IRString "s_1") TInt (IRString "actor_a", 1) (IRString "actor_c", 2),
+      IRSignal (IRString "s_2") TInt (IRString "actor_b", 2) (IRString "actor_d", 2),
+      IRSignal (IRString "s_3") TInt (IRString "actor_c", 1) (IRString "actor_d", 1),
+      IRSignal (IRString "s_4_delay") TInt (IRString "actor_d", 1) (IRString "delay", 1),
+      IRSignal (IRString "s_4") TInt (IRString "delay", 1) (IRString "actor_c", 1),
+      IRSignal (IRString "s_out") TInt (IRString "actor_d", 2) (IRString "s_out", 1)
     ]
-    [ IRFunction (IRString "add") Nothing
+    [ IRFunction (IRString "add") Nothing ([TInt], [TInt])
     ]
 
 exampleSystem5 :: IRSystem
@@ -84,16 +84,16 @@ exampleSystem5 =
     [ IRActor (IRString "a") Actor21 (IRString "add") ([IRString "s_in", IRString "s3"], [IRString "s1"]),
       IRActor (IRString "b") Actor11 (IRString "add") ([IRString "s1"], [IRString "s2"]),
       IRActor (IRString "c") Actor12 (IRString "add") ([IRString "s2"], [IRString "s3_delay", IRString "s_out"]),
-      IRDelay (IRString "delay") [0, 0, 0, 0, 0, 0] (IRString "s3_delay", IRString "s3")
+      IRDelay (IRString "delay") [LInt 0, LInt 0, LInt 0, LInt 0, LInt 0, LInt 0] (IRString "s3_delay", IRString "s3")
     ]
-    [ IRSignal (IRString "s_in") (IRString "s_in", 1) (IRString "a", 2),
-      IRSignal (IRString "s1") (IRString "a", 1) (IRString "b", 2),
-      IRSignal (IRString "s2") (IRString "b", 3) (IRString "c", 1),
-      IRSignal (IRString "s3_delay") (IRString "c", 2) (IRString "delay", 2),
-      IRSignal (IRString "s3") (IRString "delay", 3) (IRString "a", 3),
-      IRSignal (IRString "s_out") (IRString "c", 1) (IRString "s_out", 1)
+    [ IRSignal (IRString "s_in") TInt (IRString "s_in", 1) (IRString "a", 2),
+      IRSignal (IRString "s1") TInt (IRString "a", 1) (IRString "b", 2),
+      IRSignal (IRString "s2") TInt (IRString "b", 3) (IRString "c", 1),
+      IRSignal (IRString "s3_delay") TInt (IRString "c", 2) (IRString "delay", 2),
+      IRSignal (IRString "s3") TInt (IRString "delay", 3) (IRString "a", 3),
+      IRSignal (IRString "s_out") TInt (IRString "c", 1) (IRString "s_out", 1)
     ]
-    [ IRFunction (IRString "add") Nothing
+    [ IRFunction (IRString "add") Nothing ([TInt], [TInt])
     ]
 
 exampleSystem6 :: IRSystem
@@ -104,17 +104,17 @@ exampleSystem6 =
       IRActor (IRString "b") Actor11 (IRString "add") ([IRString "s1"], [IRString "s2_delay"]),
       IRActor (IRString "c") Actor11 (IRString "add") ([IRString "s3"], [IRString "s4"]),
       IRActor (IRString "d") Actor12 (IRString "add") ([IRString "s2"], [IRString "s3", IRString "s_out"]),
-      IRDelay (IRString "delay") [0, 0] (IRString "s2_delay", IRString "s2")
+      IRDelay (IRString "delay") [LInt 0, LInt 0] (IRString "s2_delay", IRString "s2")
     ]
-    [ IRSignal (IRString "s_in") (IRString "s_in", 1) (IRString "a", 2),
-      IRSignal (IRString "s1") (IRString "a", 1) (IRString "b", 4),
-      IRSignal (IRString "s2_delay") (IRString "b", 1) (IRString "delay", 1),
-      IRSignal (IRString "s2") (IRString "delay", 2) (IRString "d", 2),
-      IRSignal (IRString "s3") (IRString "d", 4) (IRString "c", 1),
-      IRSignal (IRString "s4") (IRString "c", 4) (IRString "a", 2),
-      IRSignal (IRString "s_out") (IRString "d", 1) (IRString "s_out", 1)
+    [ IRSignal (IRString "s_in") TInt (IRString "s_in", 1) (IRString "a", 2),
+      IRSignal (IRString "s1") TInt (IRString "a", 1) (IRString "b", 4),
+      IRSignal (IRString "s2_delay") TInt (IRString "b", 1) (IRString "delay", 1),
+      IRSignal (IRString "s2") TInt (IRString "delay", 2) (IRString "d", 2),
+      IRSignal (IRString "s3") TInt (IRString "d", 4) (IRString "c", 1),
+      IRSignal (IRString "s4") TInt (IRString "c", 4) (IRString "a", 2),
+      IRSignal (IRString "s_out") TInt (IRString "d", 1) (IRString "s_out", 1)
     ]
-    [ IRFunction (IRString "add") Nothing
+    [ IRFunction (IRString "add") Nothing ([TInt], [TInt])
     ]
 
 ------------------------------------------------------------------------------

@@ -86,7 +86,7 @@ getSelectedSpans sel Config {system = ir} = case ir of
     findSignalSpan :: IRId -> [IRSignal] -> [IRSpan]
     findSignalSpan sig l = mapMaybe match l
       where
-        match (IRSignal n _ _) = if sig == n then irIdToSpan n else Nothing
+        match (IRSignal n _ _ _) = if sig == n then irIdToSpan n else Nothing
     findProcessSpan :: IRId -> [IRConstructor] -> [IRSpan]
     findProcessSpan proc l = mapMaybe match l
       where

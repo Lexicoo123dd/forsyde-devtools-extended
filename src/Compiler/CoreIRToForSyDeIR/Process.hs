@@ -157,7 +157,7 @@ stripApps n expr = case expr of
 
 -- | Helper function for `createDelaySDF` and `createActorSDF` which returns
 -- all integer literals within their expression as a list.
-getLits :: CoreExpr -> [IRLiteral] -> [IRLiteral]
+getLits :: CoreExpr -> [DataLiteral] -> [DataLiteral]
 getLits expr acc = case expr of
   Lit l ->
     case coreLiteralToIR l of
@@ -171,4 +171,4 @@ getLits expr acc = case expr of
 -- Extract integer values for rates.
 getRates :: CoreExpr -> [Int]
 getRates expr =
-  [n | IRInt n <- getLits expr []]
+  [n | LInt n <- getLits expr []]

@@ -76,19 +76,19 @@ splitFunctionType ty =
     Nothing ->
       ([], ty)
 
-translateCoreTypeToIR :: Type -> Maybe IRType
+translateCoreTypeToIR :: Type -> Maybe DataType
 translateCoreTypeToIR ty =
   case splitTyConApp_maybe ty of
     Just (tyCon, [])
-      | tyCon == intTyCon -> Just IRIntType
-      | tyCon == floatTyCon -> Just IRFloatType
-      | tyCon == boolTyCon -> Just IRBoolType
+      | tyCon == intTyCon -> Just TInt
+      | tyCon == floatTyCon -> Just TFloat
+      | tyCon == boolTyCon -> Just TBool
     Just (tyCon, [elementType])
       | tyCon == listTyCon ->
           translateCoreTypeToIR elementType
     _ -> Nothing
 
-extractOutputTypes :: Type -> Maybe [IRType]
+extractOutputTypes :: Type -> Maybe [DataType]
 extractOutputTypes ty =
   case splitTyConApp_maybe ty of
     Just (tyCon, typeArguments)

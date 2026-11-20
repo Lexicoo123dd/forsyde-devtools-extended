@@ -50,6 +50,7 @@ library
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
     Compiler.Scheduler.SDFSchedule
+    Compiler.Types
     Compiler.CoreIRToForSyDeIR.Context
     Compiler.CoreIRToForSyDeIR.CoreAnalysis
     Compiler.CoreIRToForSyDeIR.Function
@@ -86,6 +87,7 @@ executable forsyde-compiler-exe
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
     Compiler.Scheduler.SDFSchedule
+    Compiler.Types
     Compiler.CoreIRToForSyDeIR.Context
     Compiler.CoreIRToForSyDeIR.CoreAnalysis
     Compiler.CoreIRToForSyDeIR.Function
@@ -110,6 +112,7 @@ executable forsyde-lsp-exe
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
     Compiler.Scheduler.SDFSchedule
+    Compiler.Types
     Compiler.CoreIRToForSyDeIR.Context
     Compiler.CoreIRToForSyDeIR.CoreAnalysis
     Compiler.CoreIRToForSyDeIR.Function

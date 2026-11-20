@@ -2,7 +2,9 @@
     "system": {
         "functions": [
             {
-                "name": "add"
+                "inputTypes": "[TInt]",
+                "name": "add",
+                "outputType": "[TInt]"
             }
         ],
         "inputs": [
@@ -20,7 +22,10 @@
             {
                 "name": "delay_1",
                 "tokens": [
-                    0
+                    {
+                        "type": "Int",
+                        "value": 0
+                    }
                 ],
                 "type": "Delay"
             }
@@ -35,7 +40,8 @@
                 "target": {
                     "name": "actor_1",
                     "rate": 1
-                }
+                },
+                "type": "TInt"
             },
             {
                 "name": "s_1",
@@ -46,7 +52,8 @@
                 "target": {
                     "name": "delay_1",
                     "rate": 1
-                }
+                },
+                "type": "TInt"
             },
             {
                 "name": "s_2",
@@ -57,7 +64,8 @@
                 "target": {
                     "name": "actor_1",
                     "rate": 1
-                }
+                },
+                "type": "TInt"
             },
             {
                 "name": "s_out",
@@ -68,7 +76,8 @@
                 "target": {
                     "name": "output",
                     "rate": 1
-                }
+                },
+                "type": "TInt"
             }
         ]
     }
