@@ -55,24 +55,24 @@ pipelineModel =
     [ IRActor (IRString "a") Actor11 (IRString "identity") ([IRString "s_in"], [IRString "s_mid"]),
       IRActor (IRString "b") Actor11 (IRString "identity") ([IRString "s_mid"], [IRString "s_out"])
     ]
-    [ IRSignal (IRString "s_in") (IRString "input", 1) (IRString "a", 1),
-      IRSignal (IRString "s_mid") (IRString "a", 1) (IRString "b", 1),
-      IRSignal (IRString "s_out") (IRString "b", 1) (IRString "output", 1)
+    [ IRSignal (IRString "s_in") TInt (IRString "input", 1) (IRString "a", 1),
+      IRSignal (IRString "s_mid") TInt (IRString "a", 1) (IRString "b", 1),
+      IRSignal (IRString "s_out") TInt (IRString "b", 1) (IRString "output", 1)
     ]
-    [IRFunction (IRString "identity") Nothing]
+    [IRFunction (IRString "identity") Nothing ([TInt], [TInt])]
 
 delayModel :: IRSystem
 delayModel =
   IRSystem
     ([], [])
     [ IRActor (IRString "a") Actor11 (IRString "identity") ([], [IRString "s_delay"]),
-      IRDelay (IRString "delay") [0, 0] (IRString "s_delay", IRString "s_after"),
+      IRDelay (IRString "delay") [LInt 0, LInt 0] (IRString "s_delay", IRString "s_after"),
       IRActor (IRString "b") Actor11 (IRString "identity") ([IRString "s_after"], [])
     ]
-    [ IRSignal (IRString "s_delay") (IRString "a", 2) (IRString "delay", 3),
-      IRSignal (IRString "s_after") (IRString "delay", 4) (IRString "b", 5)
+    [ IRSignal (IRString "s_delay") TInt (IRString "a", 2) (IRString "delay", 3),
+      IRSignal (IRString "s_after") TInt (IRString "delay", 4) (IRString "b", 5)
     ]
-    [IRFunction (IRString "identity") Nothing]
+    [IRFunction (IRString "identity") Nothing ([TInt], [TInt])]
 
 graphId :: GraphElement -> T.Text
 graphId KGraph {gid = identifier} = identifier
