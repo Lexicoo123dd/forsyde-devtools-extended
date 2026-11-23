@@ -1,0 +1,16 @@
+systemgraph {
+  vertex "actor_1"
+  [moc::sdf::SDFActor, moc::sdf::SDFComb, visualization::Visualizable]
+  (combFunctions, s_in, s_out)
+  {
+    "consumption": {
+      "s_in": 1_i
+    },
+    "production": {
+      "s_out": 1_i
+    }
+  }
+
+
+
+}
