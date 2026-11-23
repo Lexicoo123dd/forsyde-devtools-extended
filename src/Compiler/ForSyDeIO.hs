@@ -145,7 +145,8 @@ prettyForSyDeIO dflags (IRSystem (globalInputs, globalOutputs) constructors sign
               vsep $ mapMaybe (\(c, s) -> prettyActorEdge c s globalOutputs) actorEdges,
               vsep $ map (\(s, (t, p)) -> prettySignalEdge s t p) signalEdges
             ],
-          rbrace
+          rbrace,
+          mempty
         ]
   in renderString $ layoutPretty defaultLayoutOptions document
   where

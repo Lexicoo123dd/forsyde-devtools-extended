@@ -1,0 +1,44 @@
+systemgraph {
+  vertex "actor_1"
+  [moc::sdf::SDFActor, moc::sdf::SDFComb, visualization::Visualizable]
+  (combFunctions, s_in, s_loop2, s_1, s_loop)
+  {
+    "consumption": {
+      "s_in": 1_i,
+      "s_loop2": 1_i
+    },
+    "production": {
+      "s_1": 1_i,
+      "s_loop": 1_i
+    }
+  }
+  vertex "actor_2"
+  [moc::sdf::SDFActor, moc::sdf::SDFComb, visualization::Visualizable]
+  (combFunctions, s_1, s_out)
+  {
+    "consumption": {
+      "s_1": 1_i
+    },
+    "production": {
+      "s_out": 1_i
+    }
+  }
+  vertex "s_1_sig"
+  [moc::sdf::SDFChannel, visualization::Visualizable]
+  (producer, consumer, initialTokenValues)
+  {
+    "numOfInitialTokens": 0_i,
+    "tokenSizeInBits": 64_l
+  }
+  vertex "s_loop_sig"
+  [moc::sdf::SDFChannel, visualization::Visualizable]
+  (producer, consumer, initialTokenValues)
+  {
+    "numOfInitialTokens": 1_i,
+    "tokenSizeInBits": 64_l
+  }
+  edge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from "actor_1" port "s_1" to "s_1_sig" port "producer"
+  edge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from "actor_1" port "s_loop" to "s_loop_sig" port "producer"
+  edge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from "s_1_sig" port "consumer" to "actor_2" port "s_1"
+  edge [moc::sdf::SDFDataEdge, visualization::VisualConnection] from "s_loop_sig" port "consumer" to "actor_1" port "s_loop2"
+}
