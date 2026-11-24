@@ -8,13 +8,14 @@
 -- KLighD's graph schema. Keeping the mapping here lets the language server
 -- coordinate protocol messages without also knowing how diagram elements are
 -- rendered or laid out.
-module Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph) where
+module Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph, forSyDeIRToGraphWithOptions, graphElementIdsForNames) where
 
 import Compiler.ForSyDeIR
 import Compiler.Scheduler.SDFSchedule (Schedule (..))
 import Data.Function ((&))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)
+import Visualiser.Options (VisualiserOptions (..), defaultVisualiserOptions)
 import Visualiser.SKGraphSchema
 
 -- | Schedule analysis information displayed by the visualiser.
@@ -24,11 +25,30 @@ data ScheduleStatus
   | ScheduleReady Schedule
   deriving (Show)
 
+-- Keep source-selection IDs identical to the IDs used during graph synthesis.
+nodeIdFor :: IRId -> T.Text
+nodeIdFor name = "$root$N$" <> T.show name
+
+edgeIdFor :: IRId -> IRId -> T.Text
+edgeIdFor sourceName name = nodeIdFor sourceName <> "$P$" <> T.show name <> "$E$" <> T.show name
+
+graphElementIdsForNames :: IRSystem -> [T.Text] -> [T.Text]
+graphElementIdsForNames (IRSystem _ constructors signals _) names =
+  [nodeIdFor name | constructor <- constructors, name <- constructorName constructor, T.show name `elem` names]
+    <> [edgeIdFor sourceName name | IRSignal name (sourceName, _) _ <- signals, T.show name `elem` names]
+  where
+    constructorName (IRActor name _ _ _) = [name]
+    constructorName (IRDelay name _ _) = [name]
+
 -- | Convert a ForSyDe IR system into the graph representation understood by
 -- KLighD. Successful schedule analysis adds buffer sizes, schedulability, and
 -- the actor firing order; failed analysis preserves the reason in the diagram.
 forSyDeIRToGraph :: FilePath -> IRSystem -> ScheduleStatus -> GraphElement
-forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) scheduleStatus = graph
+forSyDeIRToGraph filename ir scheduleStatus = forSyDeIRToGraphWithOptions filename ir scheduleStatus defaultVisualiserOptions
+
+-- The schedule stays available for buffer analysis when its decorations are hidden.
+forSyDeIRToGraphWithOptions :: FilePath -> IRSystem -> ScheduleStatus -> VisualiserOptions -> GraphElement
+forSyDeIRToGraphWithOptions filename (IRSystem (inputs, outputs) actors signals _) scheduleStatus options = graph
   where
     -- \| Create a port with a label for signal rate
     createPort parent rends props (n, _) =
@@ -95,7 +115,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
     -- \| Helper for createNode and global inputs / outputs
     createNode' name nodeLabel nodeRenderings nodeProperties = node
       where
-        nodeId = "$root$N$" <> T.show name
+        nodeId = nodeIdFor name
         inputSignals = findInputSignals signals name
         outputSignals = findOutputSignals signals name
         inputPortRendering = if delayId name actors then [] else [KText "▶" []]
@@ -127,7 +147,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
       where
         sourcePort = "$root$N$" <> T.show sourceName <> "$P$" <> T.show name
         targetPort = "$root$N$" <> T.show targetName <> "$P$" <> T.show name
-        edgeId = sourcePort <> "$E$" <> T.show name
+        edgeId = edgeIdFor sourceName name
         signalLabelId = edgeId <> "$L$" <> T.show name
         targetRateLabel = [KLabel {gid = signalLabelId <> "$" <> T.show targetName, label = T.show targetRate, properties = [EdgeLabelsPlacement 1]}]
         sourceRateLabel = [KLabel {gid = signalLabelId <> "$" <> T.show sourceName, label = T.show sourceRate, properties = [EdgeLabelsPlacement 2]}]
@@ -158,9 +178,8 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) schedule
       case scheduleStatus of
         ScheduleNotComputed -> []
         ScheduleReady (Schedule (firingOrder, _, _)) ->
-          [ createScheduleDiagnostic "Schedulable" (KBackgroundColor 170 220 170),
-            createScheduleNode firingOrder
-          ]
+          [createScheduleDiagnostic "Schedulable" (KBackgroundColor 170 220 170)]
+            <> [createScheduleNode firingOrder | showFiringOrder options]
         ScheduleFailed reason -> [createScheduleDiagnostic ("Unschedulable: " <> reason) (KBackgroundColor 240 170 170)]
     createScheduleDiagnostic message background =
       KNode

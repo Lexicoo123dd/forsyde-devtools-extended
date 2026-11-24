@@ -18,13 +18,15 @@ import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers)
 import qualified Control.Exception as E
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
+import Visualiser.Options (VisualiserOptions, defaultVisualiserOptions)
 
 data Config = Config
   { file :: Maybe FilePath,
     clientId :: Maybe T.Text,
     system :: Maybe IRSystem,
     schedule :: Maybe (Either String Schedule),
-    forSyDePkg :: Maybe FilePath
+    forSyDePkg :: Maybe FilePath,
+    visualiserOptions :: VisualiserOptions
   }
   deriving (Show)
 
@@ -35,7 +37,8 @@ defaultConfig =
       clientId = Nothing,
       system = Nothing,
       schedule = Nothing,
-      forSyDePkg = Nothing
+      forSyDePkg = Nothing,
+      visualiserOptions = defaultVisualiserOptions
     }
 
 data CompileOptions = CompileOptions

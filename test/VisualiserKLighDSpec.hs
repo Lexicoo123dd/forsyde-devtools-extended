@@ -6,14 +6,44 @@ module VisualiserKLighDSpec (spec) where
 
 import Compiler.ForSyDeIR
 import Compiler.Scheduler.SDFSchedule (Schedule (..))
+import qualified Data.Aeson as A
+import Data.Aeson ((.=))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)
 import Test.Hspec
-import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph)
+import Visualiser.KLighD (ScheduleStatus (..), forSyDeIRToGraph, forSyDeIRToGraphWithOptions, graphElementIdsForNames)
+import Visualiser.Options
 import Visualiser.SKGraphSchema
 
 spec :: Spec
 spec = describe "KLighD diagram synthesis" $ do
+  it "starts with all three controls enabled and updates them independently" $ do
+    let change ident enabled = A.object ["synthesisOptions" .= [A.object ["id" .= (ident :: T.Text), "currentValue" .= enabled]]]
+        initial = defaultVisualiserOptions
+        noOrder = applySynthesisOptions (change "forsyde.showFiringOrder" False) initial
+        noDiagramToSource = applySynthesisOptions (change "forsyde.diagramToSource" False) noOrder
+        allOff = applySynthesisOptions (change "forsyde.sourceToDiagram" False) noDiagramToSource
+    initial `shouldBe` VisualiserOptions True True True
+    length (valuedSynthesisOptions initial) `shouldBe` 3
+    noOrder `shouldBe` VisualiserOptions False True True
+    noDiagramToSource `shouldBe` VisualiserOptions False False True
+    allOff `shouldBe` VisualiserOptions False False False
+    applySynthesisOptions (change "forsyde.showFiringOrder" True) allOff `shouldBe` VisualiserOptions True False False
+  it "hides firing order without hiding schedule status or buffer sizes" $ do
+    let options = defaultVisualiserOptions {showFiringOrder = False}
+        schedule = Schedule ([IRString "a", IRString "b"], [(IRString "s_mid", 2)], [])
+        ready = rootChildren $ forSyDeIRToGraphWithOptions "model.hs" pipelineModel (ScheduleReady schedule) options
+        failed = rootChildren $ forSyDeIRToGraphWithOptions "model.hs" pipelineModel (ScheduleFailed "failure") options
+    map elementId ready `shouldNotContain` ["$root$N$schedule"]
+    nodeLabels (findById "$root$N$schedule_status" ready) `shouldBe` ["Schedulable"]
+    nodeLabels (findById "$root$N$schedule_status" failed) `shouldBe` ["Unschedulable: failure"]
+    edgeLabels (findById "$root$N$a$P$s_mid$E$s_mid" ready) `shouldBe` ["|s_mid| = 2", "1", "1"]
+  it "maps source names to actor and signal IDs used by the diagram" $ do
+    graphElementIdsForNames pipelineModel ["a", "s_mid", "unknown"]
+      `shouldBe` ["$root$N$a", "$root$N$a$P$s_mid$E$s_mid"]
+    graphElementIdsForNames pipelineModel [] `shouldBe` []
+    graphElementIdsForNames delayModel ["delay", "s_after"]
+      `shouldBe` ["$root$N$delay", "$root$N$delay$P$s_after$E$s_after"]
   it "preserves graph identity and actor-input-output-edge ordering" $ do
     -- This synthetic path is a test fixture and is never accessed on disk.
     let path = "D:\\example\\path\\model.hs"
