@@ -1,6 +1,5 @@
 module ArgumentsMain where
 
-import Compiler.Scheduler.Common (SchedulingStrategy (..))
 import Data.Char (toLower)
 import Options.Applicative
 
@@ -46,6 +45,10 @@ data Runs
   = Limited Int
   | Perpetual
 
+data StrategyType
+  = StrategyGreedy
+  | StrategyHuLevel
+
 data Arguments = Arguments
   { -- Files
     input :: Input,
@@ -61,7 +64,8 @@ data Arguments = Arguments
     forSyDePath :: Maybe FilePath,
 
     -- Scheduling strategy
-    scheduleStrategy :: SchedulingStrategy
+    scheduleStrategy :: StrategyType,
+    numCores :: Int
   }
 
 -- Handle file input, always need to define a file
@@ -270,20 +274,34 @@ forSyDePathOption =
     )
 
 -- Flag for scheduling strategy: defaults to greedy.
-scheduleStrategyOption :: Parser SchedulingStrategy
+scheduleStrategyOption :: Parser StrategyType
 scheduleStrategyOption =
   option
     (str >>= parseStrategy)
     ( long "schedule-strategy"
         <> long "strategy"
         <> metavar "STRATEGY"
-        <> value Greedy
-        <> help "Scheduling strategy to use: greedy (default)"
+        <> value StrategyGreedy
+        <> help "Scheduling strategy to use: greedy (default), hu-level"
     )
   where
     parseStrategy s = case map toLower s of
-      "greedy" -> pure Greedy
-      other -> readerError ("Unknown scheduling strategy '" ++ other ++ "'. Supported strategies: greedy")
+      "greedy" -> pure StrategyGreedy
+      "hu-level" -> pure StrategyHuLevel
+      other -> readerError ("Unknown scheduling strategy '" ++ other ++ "'. Supported strategies: greedy, hu-level")
+
+-- Optional flag for number of cores: default is 2 cores.
+numCoresOption :: Parser Int
+numCoresOption =
+  option
+    auto
+    ( short 'c'
+        <> long "cores"
+        <> metavar "NUM_CORES"
+        <> value 2
+        <> showDefault
+        <> help "Number of cores to use for multi-core scheduling"
+    )
 
 -- Top level argument parsing function, takes 4 flags.
 arguments :: Parser Arguments
@@ -297,3 +315,4 @@ arguments =
     <*> runsTop
     <*> forSyDePathOption
     <*> scheduleStrategyOption
+    <*> numCoresOption

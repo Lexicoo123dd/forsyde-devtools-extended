@@ -92,7 +92,7 @@ data ScheduleMetrics = ScheduleMetrics
 -- | Available scheduling strategies.
 data SchedulingStrategy
   = Greedy
-  -- | HuLevel Int -- ^ Number of target cores
+  | HuLevel Int -- ^ Number of target cores
   deriving (Show, Eq)
 
 -- | The unified Schedule representation.

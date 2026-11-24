@@ -18,13 +18,16 @@ where
 import Compiler.ForSyDeIR (IRSystem)
 import Compiler.Scheduler.Common
 import Compiler.Scheduler.Greedy
+import Compiler.Scheduler.HuLevel
 
 -- | Generates a unified Schedule given a scheduling strategy and an IRSystem.
 generateSchedule :: SchedulingStrategy -> IRSystem -> Either String Schedule
 generateSchedule strategy irSystem = case strategy of
   Greedy -> generateGreedySchedule irSystem
+  HuLevel numCores -> generateHuLevelSchedule numCores irSystem
 
 -- | Pretty-prints a schedule according to its strategy and the IRSystem.
 prettySchedule :: IRSystem -> Schedule -> String
 prettySchedule irSystem sched = case schedStrategy sched of
   Greedy -> prettyGreedySchedule irSystem sched
+  HuLevel numCores -> prettyHuLevelSchedule numCores irSystem sched

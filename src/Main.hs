@@ -1,6 +1,6 @@
 module Main where
 
-import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments)
+import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments, StrategyType (..))
 import Compiler.CoreIR (prettyCoreProgram)
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.ForSyDeIR (prettyIRJSON, prettyIRSystem)
@@ -9,6 +9,7 @@ import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
 import Compiler.ProceduralIR (prettyProgram)
 import Compiler.ProceduralIRToC (translateProgram)
 import Compiler.SchedulerMain (generateSchedule, prettySchedule)
+import Compiler.Scheduler.Common (SchedulingStrategy (..))
 import Options.Applicative
 
 {-
@@ -69,7 +70,7 @@ generateDefaultFileName f OutputSchedule = f ++ ".sched"
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
-run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath strat) = do
+run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath stratOpt numCores) = do
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
   let outputIR = case outputType of
         OutputCore ->
@@ -101,6 +102,9 @@ run (Arguments (InputFile input_file) output_file outputType target inputType ru
     computeScheduleHelper forsydeIR = case generateSchedule strat forsydeIR of
       Left e -> error e
       Right sched -> sched
+    strat = case stratOpt of
+        StrategyGreedy -> Greedy
+        StrategyHuLevel -> HuLevel numCores
 
 main :: IO ()
 main = run =<< execParser opts
