@@ -126,7 +126,6 @@ test-suite forsyde-devtools-test
 
   other-modules:
     ComparisonSpec
-    ExecutionTimeSpec
     ForSyDeIRSpec
     LSPUriSpec
     ProceduralIRSpec
