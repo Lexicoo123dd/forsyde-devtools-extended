@@ -14,7 +14,7 @@ where
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.ForSyDeIR
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
-import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers)
+import Schedule (Schedule (..), computeScheduleAndBuffers)
 import qualified Control.Exception as E
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T

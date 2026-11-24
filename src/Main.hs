@@ -1,15 +1,46 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
-import ArgumentsMain (Output (..), HasExtension (..), OutputFormat (..), Input (..), Arguments (Arguments), arguments)
+import ArgumentsMain 
 import Compiler.CoreIR (prettyCoreProgram)
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
-import Compiler.ForSyDeIR (prettyIRJSON, prettyIRSystem)
-import Compiler.ForSyDeIRToProceduralIR (translateIRSystemToProgram)
+import Compiler.ForSyDeIR (IRSystem, prettyIRJSON, prettyIRSystem)
+import Control.Exception (IOException, catch)
+import Control.Monad (unless, when)
+import Compiler.ForSyDeIRToProceduralIR
+  ( generateInputHeader,
+    translateScheduleToProgram,
+  )
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
 import Compiler.ProceduralIR (prettyProgram)
 import Compiler.ProceduralIRToC (translateProgram)
-import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
 import Options.Applicative
+import Schedule
+  ( Schedule (..),
+    generateSchedule,
+    prettySchedule,
+  )
+import System.Directory
+  ( createDirectoryIfMissing,
+    createDirectoryLink,
+    doesFileExist,
+    doesPathExist,
+    getCurrentDirectory,
+    makeAbsolute,
+    pathIsSymbolicLink,
+  )
+import System.Environment (lookupEnv)
+import System.FilePath
+  ( dropExtension,
+    joinPath,
+    normalise,
+    splitDirectories,
+    takeBaseName,
+    takeDirectory,
+    takeExtension,
+    takeFileName,
+    (</>),
+  )
 
 {-
 
@@ -69,37 +100,66 @@ generateDefaultFileName f OutputSchedule = f ++ ".sched"
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
-run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath) = do
+run args = do
+  let InputFile input_file = input args
+      output_file = output args
+      out_fmt = output_format args
+      t = target args
+      inputType = iType args
+      r = runs args
+      pkgPath = forSyDePath args
+      strat = scheduleStrategy args
+      schedPrint = printSchedule args
+
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
-  let outputIR = case outputType of
-        OutputCore ->
-          prettyCoreProgram dflags core
-        OutputForSyDeIR -> do
-          let (forsydeIR, _) = translateCoreHelper dflags core
-          prettyIRSystem dflags forsydeIR
-        OutputForSyDeIRJSON -> do
-          let (forsydeIR, _) = translateCoreHelper dflags core
-          prettyIRJSON forsydeIR
-        OutputSchedule -> do
-          let (forsydeIR, _) = translateCoreHelper dflags core
-          computeScheduleAndBuffersPrint forsydeIR
-        OutputProceduralIR -> do
-          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
-          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
-          prettyProgram $ translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
-        OutputC -> do
-          let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
-          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
-          let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
-          translateProgram proceduralIR target inputType True
-  write_output output_file outputType outputIR
-  where
-    translateCoreHelper dflags core = case translateCoreProgram dflags core of
-      Left e -> error e
-      Right v -> v
-    computeScheduleHelper forsydeIR = case computeScheduleAndBuffers forsydeIR of
-      Left e -> error e
-      Right (Schedule v) -> v
+  let (forsydeIR, lookupSignals) = case translateCoreProgram dflags core of
+        Left e -> error e
+        Right v -> v
+
+  -- Generate schedule using the selected strategy
+  let schedule = case generateSchedule strat forsydeIR of
+        Left e -> error e
+        Right s -> s
+
+  -- 1. Check if schedule printing was requested via -s / --print-schedule
+  case schedPrint of
+    SchedulePrintStdOut -> putStr (prettySchedule forsydeIR schedule)
+    SchedulePrintFile path -> writeFile path (prettySchedule forsydeIR schedule)
+    NoSchedulePrint -> pure ()
+
+  -- 2. Execute output according to output format
+  case out_fmt of
+    OutputSchedule ->
+      write_output output_file OutputSchedule (prettySchedule forsydeIR schedule)
+
+    OutputC -> do
+      let isMultiCore = length (schedCores schedule) > 1
+      let effectiveInputType = if isMultiCore then Predefined else inputType
+      let isBench = benchmark args
+      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r isBench forsydeIR
+      let c = translateProgram proceduralIR t effectiveInputType True
+      case output_file of
+        StdOut -> do
+          putStr c
+        _ -> do
+          cFilePath <- setupCOutput input_file output_file isMultiCore effectiveInputType forsydeIR schedule
+          writeFile cFilePath c
+
+    OutputCore ->
+      write_output output_file OutputCore (prettyCoreProgram dflags core)
+
+    OutputForSyDeIR ->
+      write_output output_file OutputForSyDeIR (prettyIRSystem dflags forsydeIR)
+
+    OutputForSyDeIRJSON ->
+      write_output output_file OutputForSyDeIRJSON (prettyIRJSON forsydeIR)
+
+    OutputProceduralIR -> do
+      let isMultiCore = length (schedCores schedule) > 1
+      let effectiveInputType = if isMultiCore then Predefined else inputType
+      let isBench = benchmark args
+      let proceduralIR = translateScheduleToProgram dflags schedule lookupSignals t effectiveInputType r isBench forsydeIR
+      write_output output_file OutputProceduralIR (prettyProgram proceduralIR)
 
 main :: IO ()
 main = run =<< execParser opts
@@ -111,3 +171,104 @@ main = run =<< execParser opts
             <> progDesc "Compile a ForSyDe model"
             <> header "ForSyDe DevTools"
         )
+
+-- | Sets up the C output directory: creates the directory, writes input.h
+-- if needed, configures the include symlink, and returns the path to the C file.
+setupCOutput :: FilePath -> Output -> Bool -> InputType -> IRSystem -> Schedule -> IO FilePath
+setupCOutput inputPath outputVal isMultiCore effectiveInputType forsydeIR schedule = do
+  let (targetDir, cFilePath) = resolveCOutput inputPath outputVal
+  createDirectoryIfMissing True targetDir
+  when (isMultiCore || effectiveInputType == Predefined) $ do
+    let inputHeaderPath = targetDir </> "input.h"
+    headerExists <- doesFileExist inputHeaderPath
+    unless headerExists $
+      writeFile inputHeaderPath (generateInputHeader forsydeIR schedule)
+  setupIncludeSymlink targetDir
+  pure cFilePath
+
+-- | Resolves the target output directory and C source file path based on the input model
+-- and the requested output path.
+-- - If -o specifies a directory (or has no .c extension), puts main.c inside that directory.
+-- - If -o specifies a file with a parent directory (e.g. -o dir/test.c), keeps that file and uses dir.
+-- - If -o specifies a simple filename (e.g. -o test.c), creates a folder named after the file stem (e.g. test/test.c).
+-- - If default -o main is used, creates a folder named after the model stem (e.g. SDF_example_002/main.c).
+resolveCOutput :: FilePath -> Output -> (FilePath, FilePath)
+resolveCOutput inputPath outputVal = case outputVal of
+  StdOut -> ("", "")
+  OutputFile (rawPath, hasExt) ->
+    let ext = takeExtension rawPath
+        dir = takeDirectory rawPath
+        stem = takeBaseName inputPath
+     in if ext == ".c"
+          then
+            if dir == "" || dir == "."
+              then let outDir = dropExtension (takeFileName rawPath) in (outDir, outDir </> takeFileName rawPath)
+              else (dir, rawPath)
+          else
+            let targetDir = case (rawPath, hasExt) of
+                  ("main", NoFileExtension) -> stem
+                  _ -> rawPath
+             in (targetDir, targetDir </> "main.c")
+
+-- | Sets up a relative symbolic link from `targetDir/include` to the repository's `include` directory.
+setupIncludeSymlink :: FilePath -> IO ()
+setupIncludeSymlink targetDir = do
+  mIncDir <- findIncludeDir
+  case mIncDir of
+    Nothing -> pure ()
+    Just incDir -> do
+      absTargetDir <- makeAbsolute targetDir
+      absIncDir <- makeAbsolute incDir
+      let targetInclude = absTargetDir </> "include"
+      -- Don't create symlink if targetDir already IS or CONTAINS the real include directory
+      unless (normalise targetInclude == normalise absIncDir || normalise absTargetDir == normalise absIncDir) $ do
+        linkExists <- doesPathExist targetInclude
+        isSymlink <- pathIsSymbolicLink targetInclude `catch` (\(_ :: IOException) -> pure False)
+        unless (linkExists || isSymlink) $ do
+          let relIncDir = computeRelativePath absTargetDir absIncDir
+          createDirectoryLink relIncDir targetInclude
+
+-- | Searches for the `include` directory containing `common.h` in the environment,
+-- current directory, or any parent directory.
+findIncludeDir :: IO (Maybe FilePath)
+findIncludeDir = do
+  mEnv <- lookupEnv "FORSYDE_INCLUDE_PATH"
+  case mEnv of
+    Just p -> do
+      ex <- doesFileExist (p </> "common.h")
+      if ex then pure (Just p) else searchParents
+    Nothing -> searchParents
+  where
+    searchParents = do
+      cwd <- getCurrentDirectory
+      search cwd
+    search dir = do
+      let cand = dir </> "include"
+      ex <- doesFileExist (cand </> "common.h")
+      if ex
+        then pure (Just cand)
+        else do
+          let legacyCand = dir </> "examples" </> "implementation" </> "platform_independent" </> "include"
+          legacyEx <- doesFileExist (legacyCand </> "common.h")
+          if legacyEx
+            then pure (Just legacyCand)
+            else do
+              let parent = takeDirectory dir
+              if parent == dir
+                then pure Nothing
+                else search parent
+
+-- | Computes a relative path from directory 'from' to directory 'to'.
+computeRelativePath :: FilePath -> FilePath -> FilePath
+computeRelativePath from to =
+  let fromDirs = splitDirectories from
+      toDirs = splitDirectories to
+      (_, fromRest, toRest) = stripCommon fromDirs toDirs
+      upDirs = replicate (length fromRest) ".."
+   in if null upDirs && null toRest
+        then "."
+        else joinPath (upDirs ++ toRest)
+  where
+    stripCommon (x : xs) (y : ys)
+      | x == y = let (c, r1, r2) = stripCommon xs ys in (x : c, r1, r2)
+    stripCommon xs ys = ([], xs, ys)

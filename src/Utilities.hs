@@ -12,7 +12,7 @@ where
 
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
-import Compiler.Scheduler.SDFSchedule (Schedule, computeScheduleAndBuffers)
+import Schedule (Schedule, computeScheduleAndBuffers)
 
 newtype Stack a = Stack [a] deriving (Show, Eq)
 

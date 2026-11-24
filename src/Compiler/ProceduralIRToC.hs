@@ -207,8 +207,8 @@ translateGlobal global = case global of
 translateProgram :: Program -> Target -> InputType -> Bool -> String
 translateProgram (Prog globals) target io includes =
   let targetText = case target of
-        PC -> "#define PLATFORM PC\n"
-        PICO2 -> "#define PLATFORM PICO2\n"
+        PC -> "#define PLATFORM PC\n#include <pthread.h>\n"
+        PICO2 -> "#define PLATFORM PICO2\n#include \"pico/multicore.h\"\n"
       includeInput = case io of
         StdIn -> ""
         Predefined -> "#include \"input.h\"\n"
