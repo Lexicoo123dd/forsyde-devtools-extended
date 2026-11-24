@@ -13,16 +13,6 @@ where
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
 import Schedule (Schedule, computeScheduleAndBuffers)
-import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
-import Data.Data (Data, gmapT)
-import Data.Generics (extT)
-import GHC
-import GHC.Driver.Main
-import GHC.Paths (libdir)
-import GHC.Plugins hiding (isEmpty)
-import GHC.Tc.Types
-import Schedule (Schedule, computeScheduleAndBuffers)
-import System.FilePath (takeBaseName)
 
 newtype Stack a = Stack [a] deriving (Show, Eq)
 

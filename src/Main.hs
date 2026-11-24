@@ -16,10 +16,6 @@ import Compiler.ProceduralIR (prettyProgram)
 import Compiler.ProceduralIRToC (translateProgram)
 import Options.Applicative
 import Schedule
-import Schedule.Common
-import Control.Monad (unless, when)
-import Options.Applicative
-import Schedule
   ( Schedule (..),
     generateSchedule,
     prettySchedule,
