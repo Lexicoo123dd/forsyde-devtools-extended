@@ -4,6 +4,7 @@ import ArgumentsMain (InputType (Predefined, StdIn), Runs (Limited, Perpetual))
 import Compiler.CoreIRToProceduralIR (translateIRFunction)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
+import Compiler.Scheduler.Common (Schedule (..), recordToFlatSchedule)
 import GHC hiding (targetId)
 
 -- | The `TranslationContext` is a data type which is used to pass around
@@ -52,9 +53,12 @@ initialTranslationContext dflags input r lookupSignalList bList inputList output
 -- | Translates a ForSyDe IR `IRSystem` into a Procedural IR `Program`. Requires
 -- the schedule, buffer, and delay buffer lists from the SDF scheduler as an
 -- input. Also requires an associated list of signals for lookups.
-translateIRSystemToProgram :: DynFlags -> [IRId] -> [(IRId, Int)] -> [(IRId, IRId)] -> [(IRId, IRSignal)] -> InputType -> Runs -> IRSystem -> Program
-translateIRSystemToProgram dflags scheduleList bufferList delayBufferList lookupSignalList input r (IRSystem (inputList, outputList) constructors _signalList functionList) =
-  let initialContext = initialTranslationContext dflags input r lookupSignalList bufferList inputList outputList delayBufferList
+translateIRSystemToProgram :: DynFlags -> Schedule -> [(IRId, IRSignal)] -> InputType -> Runs -> IRSystem -> Program
+translateIRSystemToProgram dflags sched lookupSignalList input r (IRSystem (inputList, outputList) constructors _signalList functionList) =
+  let scheduleList = recordToFlatSchedule sched
+      bufferList = schedBufferSizes sched
+      delayBufferList = schedDelayBuffers sched 
+      initialContext = initialTranslationContext dflags input r lookupSignalList bufferList inputList outputList delayBufferList
       context1 = foldl' translateIRConstructor initialContext constructors
       context2 = foldl' translateBuffer context1 bufferList
       context3 = foldl' (translateIRFunctionToGlobals constructors) context2 functionList

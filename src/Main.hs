@@ -8,7 +8,7 @@ import Compiler.ForSyDeIRToProceduralIR (translateIRSystemToProgram)
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
 import Compiler.ProceduralIR (prettyProgram)
 import Compiler.ProceduralIRToC (translateProgram)
-import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers, computeScheduleAndBuffersPrint)
+import Compiler.SchedulerMain (generateSchedule, prettySchedule)
 import Options.Applicative
 
 {-
@@ -69,7 +69,7 @@ generateDefaultFileName f OutputSchedule = f ++ ".sched"
 -- since the compiler doesn't go backwards.
 
 run :: Arguments -> IO ()
-run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath) = do
+run (Arguments (InputFile input_file) output_file outputType target inputType runs pkgPath strat) = do
   (core, dflags) <- compileToCoreWithForSyDePath pkgPath input_file
   let outputIR = case outputType of
         OutputCore ->
@@ -82,24 +82,25 @@ run (Arguments (InputFile input_file) output_file outputType target inputType ru
           prettyIRJSON forsydeIR
         OutputSchedule -> do
           let (forsydeIR, _) = translateCoreHelper dflags core
-          computeScheduleAndBuffersPrint forsydeIR
+          let sched = computeScheduleHelper forsydeIR
+          prettySchedule forsydeIR sched
         OutputProceduralIR -> do
           let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
-          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
-          prettyProgram $ translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
+          let sched = computeScheduleHelper forsydeIR
+          prettyProgram $ translateIRSystemToProgram dflags sched lookupSignals inputType runs forsydeIR
         OutputC -> do
           let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
-          let (schedule, buffers, delayBuffers) = computeScheduleHelper forsydeIR
-          let proceduralIR = translateIRSystemToProgram dflags schedule buffers delayBuffers lookupSignals inputType runs forsydeIR
+          let sched = computeScheduleHelper forsydeIR
+          let proceduralIR = translateIRSystemToProgram dflags sched lookupSignals inputType runs forsydeIR
           translateProgram proceduralIR target inputType True
   write_output output_file outputType outputIR
   where
     translateCoreHelper dflags core = case translateCoreProgram dflags core of
       Left e -> error e
       Right v -> v
-    computeScheduleHelper forsydeIR = case computeScheduleAndBuffers forsydeIR of
+    computeScheduleHelper forsydeIR = case generateSchedule strat forsydeIR of
       Left e -> error e
-      Right (Schedule v) -> v
+      Right sched -> sched
 
 main :: IO ()
 main = run =<< execParser opts

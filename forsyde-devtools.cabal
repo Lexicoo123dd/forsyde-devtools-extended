@@ -49,7 +49,9 @@ library
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
-    Compiler.Scheduler.SDFSchedule
+    Compiler.SchedulerMain
+    Compiler.Scheduler.Common
+    Compiler.Scheduler.Greedy
     LSP.Uri
     Utilities
     Visualiser.SKGraphSchema
@@ -79,7 +81,9 @@ executable forsyde-compiler-exe
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
-    Compiler.Scheduler.SDFSchedule
+    Compiler.SchedulerMain
+    Compiler.Scheduler.Common
+    Compiler.Scheduler.Greedy
     Utilities
 
 executable forsyde-lsp-exe
@@ -97,7 +101,9 @@ executable forsyde-lsp-exe
     Compiler.ForSyDeIR
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
-    Compiler.Scheduler.SDFSchedule
+    Compiler.SchedulerMain
+    Compiler.Scheduler.Common
+    Compiler.Scheduler.Greedy
     LSP.API
     LSP.Arguments
     LSP.Uri

@@ -42,6 +42,7 @@ data IRId
   = IRVar Var
   | IRString String
   | Empty
+  deriving (Ord)
 
 instance Show IRId where
   show :: IRId -> String

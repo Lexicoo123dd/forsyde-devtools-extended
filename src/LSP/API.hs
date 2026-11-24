@@ -14,7 +14,8 @@ where
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.ForSyDeIR
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
-import Compiler.Scheduler.SDFSchedule (Schedule (..), computeScheduleAndBuffers)
+import Compiler.Scheduler.Common (Schedule (..), SchedulingStrategy (..))
+import Compiler.SchedulerMain (generateSchedule)
 import qualified Control.Exception as E
 import Data.Maybe (mapMaybe)
 import qualified Data.Text as T
@@ -67,7 +68,9 @@ compileFile options sourceFile = do
         Left e ->
           pure $ Left $ IRTranslationFailed e
         Right (ir, _) ->
-          case computeScheduleAndBuffers ir of
+          -- Hard coded to Greedy for now, but when we have an option
+          -- in the visualiser to select strategy, it can be modified
+          case generateSchedule Greedy ir of
             Left e ->
               pure $ Left $ SchedulingFailed e
             Right resSchedule ->

@@ -12,7 +12,8 @@ where
 
 import Compiler.CoreIRToForSyDeIR (translateCoreProgram)
 import Compiler.GHCCoreAPI (compileToCoreWithForSyDePath)
-import Compiler.Scheduler.SDFSchedule (Schedule, computeScheduleAndBuffers)
+import Compiler.SchedulerMain (generateSchedule)
+import Compiler.Scheduler.Common (Schedule, SchedulingStrategy (..))
 
 newtype Stack a = Stack [a] deriving (Show, Eq)
 
@@ -45,6 +46,6 @@ scheduleAndBuffer filePath = do
   case translateCoreProgram dflags core of
     Left e -> error e
     Right (forsydeIR, _lookupSignals) ->
-      pure $ case computeScheduleAndBuffers forsydeIR of
+      pure $ case generateSchedule Greedy forsydeIR of
         Left e -> error e
         Right v -> v

@@ -1,5 +1,7 @@
 module ArgumentsMain where
 
+import Compiler.Scheduler.Common (SchedulingStrategy (..))
+import Data.Char (toLower)
 import Options.Applicative
 
 -- Which file to use for input
@@ -56,7 +58,10 @@ data Arguments = Arguments
     iType :: InputType,
     runs :: Runs,
     -- Path to the package DB containing ForSyDe Shallow
-    forSyDePath :: Maybe FilePath
+    forSyDePath :: Maybe FilePath,
+
+    -- Scheduling strategy
+    scheduleStrategy :: SchedulingStrategy
   }
 
 -- Handle file input, always need to define a file
@@ -264,6 +269,22 @@ forSyDePathOption =
         <> help "The path to the ForSyDe Shallow package (unspecified by default)"
     )
 
+-- Flag for scheduling strategy: defaults to greedy.
+scheduleStrategyOption :: Parser SchedulingStrategy
+scheduleStrategyOption =
+  option
+    (str >>= parseStrategy)
+    ( long "schedule-strategy"
+        <> long "strategy"
+        <> metavar "STRATEGY"
+        <> value Greedy
+        <> help "Scheduling strategy to use: greedy (default)"
+    )
+  where
+    parseStrategy s = case map toLower s of
+      "greedy" -> pure Greedy
+      other -> readerError ("Unknown scheduling strategy '" ++ other ++ "'. Supported strategies: greedy")
+
 -- Top level argument parsing function, takes 4 flags.
 arguments :: Parser Arguments
 arguments =
@@ -275,3 +296,4 @@ arguments =
     <*> ioTop
     <*> runsTop
     <*> forSyDePathOption
+    <*> scheduleStrategyOption

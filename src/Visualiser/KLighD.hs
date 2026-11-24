@@ -11,7 +11,7 @@
 module Visualiser.KLighD (forSyDeIRToGraph) where
 
 import Compiler.ForSyDeIR
-import Compiler.Scheduler.SDFSchedule (Schedule (..))
+import Compiler.Scheduler.Common (Schedule (..))
 import Data.Function ((&))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)
@@ -79,7 +79,7 @@ forSyDeIRToGraph filename (IRSystem (inputs, outputs) actors signals _) sched = 
         labelId = parent <> "$L$" <> T.show name
         nameLabel = [KLabel {gid = labelId, label = T.show name, properties = [NodeLabelsPlacement [1, 5, 7]]}]
         labels = case sched of
-          Just (Schedule (_, buffers, _)) ->
+          Just (Schedule{schedBufferSizes = buffers}) ->
             case lookup name buffers of
               Just size -> [KLabel {gid = labelId, label = "|" <> T.show name <> "| = " <> T.show size, properties = [NodeLabelsPlacement [1, 5, 7]]}]
               Nothing -> []

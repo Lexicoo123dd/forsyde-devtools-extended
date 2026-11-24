@@ -5,7 +5,7 @@
 module VisualiserKLighDSpec (spec) where
 
 import Compiler.ForSyDeIR
-import Compiler.Scheduler.SDFSchedule (Schedule (..))
+import Compiler.Scheduler.Common (Schedule (..), SchedulingStrategy (..))
 import qualified Data.Text as T
 import LSP.Uri (filePathToUriText)
 import Test.Hspec
@@ -31,7 +31,12 @@ spec = describe "KLighD diagram synthesis" $ do
 
   it "uses signal names before scheduling and buffer sizes afterwards" $ do
     let unscheduledEdge = findById "$root$N$a$P$s_mid$E$s_mid" $ rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel Nothing
-        schedule = Schedule ([IRString "a", IRString "b"], [(IRString "s_mid", 2)], [])
+        schedule = Schedule
+          { schedStrategy = Greedy,
+            schedPerCore = [[(IRString "a", 1), (IRString "b", 1)]],
+            schedBufferSizes = [(IRString "s_mid", 2)],
+            schedDelayBuffers = [],
+            schedMetrics = Nothing }
         scheduledEdge = findById "$root$N$a$P$s_mid$E$s_mid" $ rootChildren $ forSyDeIRToGraph "model.hs" pipelineModel (Just schedule)
     edgeLabels unscheduledEdge `shouldBe` ["s_mid", "1", "1"]
     edgeLabels scheduledEdge `shouldBe` ["|s_mid| = 2", "1", "1"]
