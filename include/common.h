@@ -1,15 +1,8 @@
 #ifndef COMMON_H
 #define COMMON_H
 
-#include "buffer_nonblocking.h"
+#include "buffer.h"
 #include "actor_templates.h"
-
-/** @brief Specification for functionality that each platform needs supported:
- * @param token - This is the data type that is passed around in the signal
- * @param read_token_blocking - Function for reading a token with a blocking
- *                              fifo
- * @param write_token_blocking - Function for writing a token to a blocking fifo
-*/
 
 /** @brief Selected target platform is a Linux PC */
 #define PC 1
@@ -27,16 +20,30 @@
 #endif
 
 #if PLATFORM == PC
-    #include "buffer_blocking_pc.h"
     static void init(void) {}
 #endif
 
 #if PLATFORM == PICO2
-    #include "buffer_blocking_pico2.h"
     #include <bsp.h>
     static void init(void) {
         BSP_Init();
     }
 #endif
 
+#ifdef BENCHMARK_TIMING
+#include <time.h>
+#include <stdio.h>
+static struct timespec _bench_start, _bench_end;
+#define BENCH_START() clock_gettime(CLOCK_MONOTONIC, &_bench_start)
+#define BENCH_END() do { \
+    clock_gettime(CLOCK_MONOTONIC, &_bench_end); \
+    double _elapsed = (_bench_end.tv_sec - _bench_start.tv_sec) + (_bench_end.tv_nsec - _bench_start.tv_nsec) * 1e-9; \
+    fprintf(stderr, "EXECUTION_TIME_SEC: %.9f\n", _elapsed); \
+} while(0)
+#else
+#define BENCH_START() ((void)0)
+#define BENCH_END() ((void)0)
 #endif
+
+#endif
+

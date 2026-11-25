@@ -31,7 +31,7 @@ static void buffer_nonblocking_init(buffer_nonblocking *buffer,
 	buffer->tail = 0;
 }
 
-static buffer_nonblocking *buffer_nonblocking_new(size_t size)
+static buffer_nonblocking *buffer_nonblocking_raw_new(size_t size)
 {
 	// Malloc for the struct
 	buffer_nonblocking * buf =
@@ -46,13 +46,13 @@ static buffer_nonblocking *buffer_nonblocking_new(size_t size)
 	return buf;
 }
 
-static void buffer_nonblocking_free(buffer_nonblocking *buf)
+static void buffer_nonblocking_raw_free(buffer_nonblocking *buf)
 {
 	free(buf->tokens);
 	free(buf);
 }
 
-static void write_token(buffer_nonblocking *buf, token data)
+static void write_token_nonblocking(buffer_nonblocking *buf, token data)
 {
 	buf->tokens[buf->head] = data;
 	buf->head = (buf->head + 1) %
@@ -60,7 +60,7 @@ static void write_token(buffer_nonblocking *buf, token data)
 	++buf->used;
 }
 
-static void read_token(buffer_nonblocking *buf, token *data)
+static void read_token_nonblocking(buffer_nonblocking *buf, token *data)
 {
 	*data = buf->tokens[buf->tail];
 	buf->tail = (buf->tail + 1) %
@@ -68,7 +68,7 @@ static void read_token(buffer_nonblocking *buf, token *data)
 	--buf->used;
 }
 
-static size_t contained_tokens(buffer_nonblocking *buf)
+static size_t contained_tokens_nonblocking(buffer_nonblocking *buf)
 {
 	return buf->used;
 }

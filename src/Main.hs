@@ -114,13 +114,13 @@ run (Arguments (InputFile input_file) output_file outputType target inputType ru
         OutputProceduralIR -> do
           let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
           let sched = computeScheduleHelper forsydeIR
-          (prettyProgram $ translateIRSystemToProgram dflags sched lookupSignals inputType runs forsydeIR, Nothing)
+          (prettyProgram $ translateIRSystemToProgram dflags sched lookupSignals target inputType runs forsydeIR, Nothing)
         OutputC -> do
           let (forsydeIR, lookupSignals) = translateCoreHelper dflags core
           let sched = computeScheduleHelper forsydeIR
           let isMultiCore = length (schedPerCore sched) > 1
           let effectiveInputType = if isMultiCore then Predefined else inputType
-          let proceduralIR = translateIRSystemToProgram dflags sched lookupSignals effectiveInputType runs forsydeIR
+          let proceduralIR = translateIRSystemToProgram dflags sched lookupSignals target effectiveInputType runs forsydeIR
           let outputString = translateProgram proceduralIR target effectiveInputType True
           let io = case output_file of
                 StdOut -> do

@@ -2,8 +2,23 @@
 #ifndef ACTOR_TEMPLATES_H
 #define ACTOR_TEMPLATES_H
 
+#ifndef SIMULATE_WORKLOAD
+#if defined(ACTOR_WORKLOAD) && ACTOR_WORKLOAD > 0
+static inline void simulate_workload(void) {
+    volatile double acc = 1.0;
+    for (int i = 0; i < ACTOR_WORKLOAD; i++) {
+        acc = acc * 1.00001 + 0.0001;
+    }
+    __asm__ __volatile__("" : "+r"(acc) :: "memory");
+}
+#define SIMULATE_WORKLOAD() simulate_workload()
+#else
+#define SIMULATE_WORKLOAD() ((void)0)
+#endif
+#endif
+
 static void actor11SDF(int consum, int prod,
-                buffer_nonblocking *ch_in, buffer_nonblocking *ch_out,
+                buffer_t *ch_in, buffer_t *ch_out,
                 void (*f) (token *, token *))
 {
     token input[consum], output[prod];
@@ -13,6 +28,7 @@ static void actor11SDF(int consum, int prod,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output);
 
     for(i = 0; i < prod; i++) {
@@ -21,8 +37,8 @@ static void actor11SDF(int consum, int prod,
 }
 
 static void actor12SDF(int consum, int prod1, int prod2,
-                buffer_nonblocking *ch_in, buffer_nonblocking *ch_out1,
-                buffer_nonblocking *ch_out2, void (*f) (token *, token *,
+                buffer_t *ch_in, buffer_t *ch_out1,
+                buffer_t *ch_out2, void (*f) (token *, token *,
                 token *))
 {
 
@@ -33,6 +49,7 @@ static void actor12SDF(int consum, int prod1, int prod2,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -45,8 +62,8 @@ static void actor12SDF(int consum, int prod1, int prod2,
 }
 
 static void actor13SDF(int consum, int prod1, int prod2, int prod3,
-                buffer_nonblocking *ch_in, buffer_nonblocking *ch_out1,
-                buffer_nonblocking *ch_out2, buffer_nonblocking *ch_out3,
+                buffer_t *ch_in, buffer_t *ch_out1,
+                buffer_t *ch_out2, buffer_t *ch_out3,
                 void (*f) (token *, token *, token *, token *))
 {
 
@@ -57,6 +74,7 @@ static void actor13SDF(int consum, int prod1, int prod2, int prod3,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -74,9 +92,9 @@ static void actor13SDF(int consum, int prod1, int prod2, int prod3,
 
 
 static void actor14SDF(int consum, int prod1, int prod2, int prod3, int prod4,
-                buffer_nonblocking *ch_in, buffer_nonblocking *ch_out1,
-                buffer_nonblocking *ch_out2, buffer_nonblocking *ch_out3,
-                buffer_nonblocking *ch_out4, void (*f) (token *, token *,
+                buffer_t *ch_in, buffer_t *ch_out1,
+                buffer_t *ch_out2, buffer_t *ch_out3,
+                buffer_t *ch_out4, void (*f) (token *, token *,
                 token *, token *, token *))
 {
 
@@ -89,6 +107,7 @@ static void actor14SDF(int consum, int prod1, int prod2, int prod3, int prod4,
         read_token(ch_in, &input[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
@@ -110,8 +129,8 @@ static void actor14SDF(int consum, int prod1, int prod2, int prod3, int prod4,
 
 
 static void actor21SDF(int consum1, int consum2, int prod,
-                buffer_nonblocking *ch_in1, buffer_nonblocking *ch_in2,
-                buffer_nonblocking *ch_out, void (*f) (token *, token *,
+                buffer_t *ch_in1, buffer_t *ch_in2,
+                buffer_t *ch_out, void (*f) (token *, token *,
                 token *))
 {
     token input1[consum1], input2[consum2], output[prod];
@@ -125,6 +144,7 @@ static void actor21SDF(int consum1, int consum2, int prod,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output);
 
     for(i = 0; i < prod; i++) {
@@ -133,8 +153,8 @@ static void actor21SDF(int consum1, int consum2, int prod,
 }
 
 static void actor22SDF(int consum1, int consum2, int prod1, int prod2,
-                buffer_nonblocking *ch_in1, buffer_nonblocking *ch_in2,
-                buffer_nonblocking *ch_out1, buffer_nonblocking *ch_out2,
+                buffer_t *ch_in1, buffer_t *ch_in2,
+                buffer_t *ch_out1, buffer_t *ch_out2,
                 void (*f) (token *, token *, token *, token *))
 {
     token input1[consum1], input2[consum2], output1[prod1], output2[prod2];
@@ -148,6 +168,7 @@ static void actor22SDF(int consum1, int consum2, int prod1, int prod2,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -160,9 +181,9 @@ static void actor22SDF(int consum1, int consum2, int prod1, int prod2,
 }
 
 static void actor23SDF(int consum1, int consum2, int prod1, int prod2,
-                int prod3, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_out1, 
-                buffer_nonblocking *ch_out2, buffer_nonblocking *ch_out3,
+                int prod3, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_out1, 
+                buffer_t *ch_out2, buffer_t *ch_out3,
                 void (*f) (token *, token *, token *, token *, token *))
 {
     token input1[consum1], input2[consum2], output1[prod1], output2[prod2],
@@ -177,6 +198,7 @@ static void actor23SDF(int consum1, int consum2, int prod1, int prod2,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -193,10 +215,10 @@ static void actor23SDF(int consum1, int consum2, int prod1, int prod2,
 }
 
 static void actor24SDF(int consum1, int consum2, int prod1, int prod2,
-                int prod3, int prod4, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_out1,
-                buffer_nonblocking *ch_out2, buffer_nonblocking *ch_out3,
-                buffer_nonblocking *ch_out4, void (*f) (token *, token *,
+                int prod3, int prod4, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_out1,
+                buffer_t *ch_out2, buffer_t *ch_out3,
+                buffer_t *ch_out4, void (*f) (token *, token *,
                 token *, token *, token *, token *))
 {
     token input1[consum1], input2[consum2], output1[prod1], output2[prod2],
@@ -211,6 +233,7 @@ static void actor24SDF(int consum1, int consum2, int prod1, int prod2,
         read_token(ch_in2, &input2[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
@@ -231,11 +254,11 @@ static void actor24SDF(int consum1, int consum2, int prod1, int prod2,
 }
 
 static void actor31SDF(int consum1, int consum2, int consum3, int prod1,
-                buffer_nonblocking *ch_in1, buffer_nonblocking *ch_in2,
-                buffer_nonblocking *ch_in3, buffer_nonblocking *ch_out1,
+                buffer_t *ch_in1, buffer_t *ch_in2,
+                buffer_t *ch_in3, buffer_t *ch_out1,
                 void (*f) (token *, token *, token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], output1[prod1];
+    token input1[consum1], input2[consum2], input3[consum3], output1[prod1];
     int i;
 
     for(i = 0; i < consum1; i++) {
@@ -250,6 +273,7 @@ static void actor31SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1);
 
     for(i = 0; i < prod1; i++) {
@@ -258,12 +282,12 @@ static void actor31SDF(int consum1, int consum2, int consum3, int prod1,
 }
 
 static void actor32SDF(int consum1, int consum2, int consum3, int prod1,
-                int prod2, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_in3,
-                buffer_nonblocking *ch_out1, buffer_nonblocking *ch_out2,
+                int prod2, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_in3,
+                buffer_t *ch_out1, buffer_t *ch_out2,
                 void (*f) (token *, token *, token *, token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], output1[prod1],
+    token input1[consum1], input2[consum2], input3[consum3], output1[prod1],
         output2[prod2];
     int i;
 
@@ -279,6 +303,7 @@ static void actor32SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -291,13 +316,13 @@ static void actor32SDF(int consum1, int consum2, int consum3, int prod1,
 }
 
 static void actor33SDF(int consum1, int consum2, int consum3, int prod1,
-                int prod2, int prod3, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_in3,
-                buffer_nonblocking *ch_out1, buffer_nonblocking *ch_out2,
-                buffer_nonblocking *ch_out3, void (*f) (token *, token *,
+                int prod2, int prod3, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_in3,
+                buffer_t *ch_out1, buffer_t *ch_out2,
+                buffer_t *ch_out3, void (*f) (token *, token *,
                 token *, token *, token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], output1[prod1],
+    token input1[consum1], input2[consum2], input3[consum3], output1[prod1],
         output2[prod2], output3[prod3];
     int i;
 
@@ -313,6 +338,7 @@ static void actor33SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -329,14 +355,14 @@ static void actor33SDF(int consum1, int consum2, int consum3, int prod1,
 }
 
 static void actor34SDF(int consum1, int consum2, int consum3, int prod1,
-                int prod2, int prod3, int prod4, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_in3,
-                buffer_nonblocking *ch_out1, buffer_nonblocking *ch_out2,
-                buffer_nonblocking *ch_out3, buffer_nonblocking *ch_out4,
+                int prod2, int prod3, int prod4, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_in3,
+                buffer_t *ch_out1, buffer_t *ch_out2,
+                buffer_t *ch_out3, buffer_t *ch_out4,
                 void (*f) (token *, token *, token *, token *, token *,
                 token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], output1[prod1],
+    token input1[consum1], input2[consum2], input3[consum3], output1[prod1],
         output2[prod2], output3[prod3], output4[prod4];
     int i;
 
@@ -352,6 +378,7 @@ static void actor34SDF(int consum1, int consum2, int consum3, int prod1,
         read_token(ch_in3, &input3[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
@@ -372,12 +399,12 @@ static void actor34SDF(int consum1, int consum2, int consum3, int prod1,
 }
 
 static void actor41SDF(int consum1, int consum2, int consum3, int consum4,
-                int prod1, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_in3,
-                buffer_nonblocking *ch_in4, buffer_nonblocking *ch_out1,
+                int prod1, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_in3,
+                buffer_t *ch_in4, buffer_t *ch_out1,
                 void (*f) (token *, token *, token *, token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], input4[consum4],
+    token input1[consum1], input2[consum2], input3[consum3], input4[consum4],
         output1[prod1];
     int i;
 
@@ -397,6 +424,7 @@ static void actor41SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1);
 
     for(i = 0; i < prod1; i++) {
@@ -405,13 +433,13 @@ static void actor41SDF(int consum1, int consum2, int consum3, int consum4,
 }
 
 static void actor42SDF(int consum1, int consum2, int consum3, int consum4,
-                int prod1, int prod2, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_in3,
-                buffer_nonblocking *ch_in4, buffer_nonblocking *ch_out1,
-                buffer_nonblocking *ch_out2, void (*f) (token *, token *,
+                int prod1, int prod2, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_in3,
+                buffer_t *ch_in4, buffer_t *ch_out1,
+                buffer_t *ch_out2, void (*f) (token *, token *,
                 token *, token *, token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], input4[consum4],
+    token input1[consum1], input2[consum2], input3[consum3], input4[consum4],
         output1[prod1], output2[prod2];
     int i;
 
@@ -431,6 +459,7 @@ static void actor42SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1, output2);
 
     for(i = 0; i < prod1; i++) {
@@ -443,14 +472,14 @@ static void actor42SDF(int consum1, int consum2, int consum3, int consum4,
 }
 
 static void actor43SDF(int consum1, int consum2, int consum3, int consum4,
-                int prod1, int prod2, int prod3, buffer_nonblocking *ch_in1,
-                buffer_nonblocking *ch_in2, buffer_nonblocking *ch_in3,
-                buffer_nonblocking *ch_in4, buffer_nonblocking *ch_out1,
-                buffer_nonblocking *ch_out2, buffer_nonblocking *ch_out3,
+                int prod1, int prod2, int prod3, buffer_t *ch_in1,
+                buffer_t *ch_in2, buffer_t *ch_in3,
+                buffer_t *ch_in4, buffer_t *ch_out1,
+                buffer_t *ch_out2, buffer_t *ch_out3,
                 void (*f) (token *, token *, token *, token *, token *,
                 token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], input4[consum4],
+    token input1[consum1], input2[consum2], input3[consum3], input4[consum4],
         output1[prod1], output2[prod2], output3[prod3];
     int i;
 
@@ -470,6 +499,7 @@ static void actor43SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1, output2, output3);
 
     for(i = 0; i < prod1; i++) {
@@ -487,14 +517,14 @@ static void actor43SDF(int consum1, int consum2, int consum3, int consum4,
 
 static void actor44SDF(int consum1, int consum2, int consum3, int consum4,
                 int prod1, int prod2, int prod3, int prod4,
-                buffer_nonblocking *ch_in1, buffer_nonblocking *ch_in2,
-                buffer_nonblocking *ch_in3, buffer_nonblocking *ch_in4,
-                buffer_nonblocking *ch_out1, buffer_nonblocking *ch_out2,
-                buffer_nonblocking *ch_out3, buffer_nonblocking *ch_out4,
+                buffer_t *ch_in1, buffer_t *ch_in2,
+                buffer_t *ch_in3, buffer_t *ch_in4,
+                buffer_t *ch_out1, buffer_t *ch_out2,
+                buffer_t *ch_out3, buffer_t *ch_out4,
                 void (*f) (token *, token *, token *, token *, token *,
                 token *, token *, token *))
 {
-    token input1[consum1], input2[consum2], input3[consum1], input4[consum4],
+    token input1[consum1], input2[consum2], input3[consum3], input4[consum4],
         output1[prod1], output2[prod2], output3[prod3], output4[prod4];
     int i;
 
@@ -514,6 +544,7 @@ static void actor44SDF(int consum1, int consum2, int consum3, int consum4,
         read_token(ch_in4, &input4[i]);
     }
 
+    SIMULATE_WORKLOAD();
     f(input1, input2, input3, input4, output1, output2, output3, output4);
 
     for(i = 0; i < prod1; i++) {
