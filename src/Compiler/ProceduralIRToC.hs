@@ -87,6 +87,8 @@ translateExpression (EPointerAccess expr field) =
   translateExpression expr ++ "->" ++ field
 translateExpression (EParen expr) =
   "(" ++ translateExpression expr ++ ")"
+translateExpression (ECast typeDef expr) =
+  "(" ++ cTypeName typeDef ++ ")(" ++ translateExpression expr ++ ")"
 
 translateStatement :: Statement -> String
 translateStatement (SExpr expression) =

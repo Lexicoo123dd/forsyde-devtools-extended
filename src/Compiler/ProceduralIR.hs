@@ -104,6 +104,7 @@ data Expression
   | EMemberAccess Expression String -- expr.string
   | EPointerAccess Expression String -- expr->string
   | EParen Expression -- (expr)
+  | ECast DataType Expression
   deriving (Show)
 
 -- -- Compatibility patterns backed by the shared DataLiteral type.

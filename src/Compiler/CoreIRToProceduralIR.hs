@@ -6,6 +6,7 @@
 module Compiler.CoreIRToProceduralIR where
 
 import Compiler.CoreIR (prettyCoreAlt)
+import Compiler.CoreType (translateCoreTypeToIR)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
 import Compiler.Types (cUnionField)
@@ -39,6 +40,7 @@ data FunctionContent
   | FMinus
   | FMultiply
   | FDiv
+  | FFromIntegral DataType
   | FNegate
 
 initialTranslationContext :: DynFlags -> TranslationContext
@@ -189,29 +191,43 @@ translateAltList context alts inputId inputIndex = case alts of
 -- `FunctionContent`. The returned `FunctionContent` list is in reverse polish
 -- notation.
 translateOutputExprToFunctionContentList :: TranslationContext -> CoreExpr -> [FunctionContent] -> [FunctionContent]
-translateOutputExprToFunctionContentList context expr acc = case expr of
-  App e a ->
-    let acc1 = translateOutputExprToFunctionContentList context e acc
-     in translateOutputExprToFunctionContentList context a acc1
-  (Var varId) -> case (showPpr (flags context)) varId of
-    ":" -> FCons : acc
-    "(,)" -> FTuple : acc
-    "(,,)" -> FTuple : acc
-    "(,,,)" -> FTuple : acc
-    "[]" -> FEmptyList : acc
-    "+" -> FPlus : acc
-    "-" -> FMinus : acc
-    "*" -> FMultiply : acc
-    "div" -> FDiv : acc
-    "negate" -> FNegate : acc
-    -- Only adds current variable id if its associated to a current variable expression
-    _ -> case lookup (IRVar varId) (functionVariables context) of
-      Just _ -> FVar varId : acc
+translateOutputExprToFunctionContentList context expr acc =
+  case expr of
+    App e a ->
+      case collectArgs expr of
+        (Var varId, args)
+          | showPpr (flags context) varId == "fromIntegral",
+            length args == 2 ->
+              case args of
+                [Type _sourceType, Type targetType] ->
+                  case translateCoreTypeToIR targetType of
+                    Just targetIRType -> FFromIntegral targetIRType : acc
+                    Nothing -> acc
+                _ -> acc
+        _ ->
+          let acc1 = translateOutputExprToFunctionContentList context e acc
+           in translateOutputExprToFunctionContentList context a acc1
+    (Var varId) -> case (showPpr (flags context)) varId of
+      ":" -> FCons : acc
+      "(,)" -> FTuple : acc
+      "(,,)" -> FTuple : acc
+      "(,,,)" -> FTuple : acc
+      "[]" -> FEmptyList : acc
+      "+" -> FPlus : acc
+      "-" -> FMinus : acc
+      "*" -> FMultiply : acc
+      "div" -> FDiv : acc
+      "/" -> FDiv : acc
+      "negate" -> FNegate : acc
+      -- "fromIntegral" -> FFromIntegral : acc
+      -- Only adds current variable id if its associated to a current variable expression
+      _ -> case lookup (IRVar varId) (functionVariables context) of
+        Just _ -> FVar varId : acc
+        Nothing -> acc
+    Lit i -> case coreLiteralToIR i of
+      Just irLit -> FLit irLit : acc
       Nothing -> acc
-  Lit i -> case coreLiteralToIR i of
-    Just irLit -> FLit irLit : acc
-    Nothing -> acc
-  _ -> acc
+    _ -> acc
 
 -- | Translates a `FunctionContent` list into a Procedural IR scope.
 translateFunctionContent :: TranslationContext -> [FunctionContent] -> Statement
@@ -284,5 +300,19 @@ translateFunctionContent context contentList =
             newExprList = newExpr : exprTail
             exprsStack2 = push newExprList exprsStack1
          in exprsStack2
+      (FFromIntegral typeDef) ->
+        let (exprList, exprsStack1) = case pop exprsStack of
+              Nothing -> error "translateFunctionContent - empty expression stack when converting fromIntegral"
+              Just (elist, stack1) -> (elist, stack1)
+            (expr1, exprTail) = case exprList of
+              (e1 : eTail) -> (EParen e1, eTail)
+              _ -> error "translateFunctionContent - insufficient operands for fromIntegral"
+            -- newExpr = ECast (typeDef) expr1
+            -- newExpr = EParen (EVar (show typeDef))
+            -- expr2 = EParen expr1
+            -- newExprList = expr2 : newExpr : exprTail
+            newExpr = ECast typeDef expr1
+            newExprList = newExpr : exprTail
+         in push newExprList exprsStack1
       FCons -> exprsStack
       FTuple -> exprsStack
