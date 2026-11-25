@@ -13,7 +13,7 @@ import Data.Maybe (mapMaybe)
 import GHC hiding (Type, targetId)
 import GHC.Core
 import GHC.Plugins hiding (Type)
-import Utilities (Stack, emptyStack, pop, push, stackToList)
+import Utilities.Utilities (Stack, emptyStack, pop, push, stackToList)
 
 -- | The `TranslationContext` is a data type which is used to pass around
 -- context required to complete the translation of Core IR to Procedural IR.

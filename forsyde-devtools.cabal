@@ -56,7 +56,8 @@ library
     Compiler.Scheduler.Greedy
     Compiler.Scheduler.HuLevel
     LSP.Uri
-    Utilities
+    Utilities.OutputHandler
+    Utilities.Utilities
     Visualiser.SKGraphSchema
     Visualiser.KLighD
 
@@ -88,7 +89,8 @@ executable forsyde-compiler-exe
     Compiler.Scheduler.Common
     Compiler.Scheduler.Greedy
     Compiler.Scheduler.HuLevel
-    Utilities
+    Utilities.OutputHandler
+    Utilities.Utilities
 
 executable forsyde-lsp-exe
   import: common-options
@@ -100,8 +102,11 @@ executable forsyde-lsp-exe
 
   build-depends: forsyde-devtools
   other-modules:
+    ArgumentsMain
     Compiler.CoreIR
     Compiler.CoreIRToForSyDeIR
+    Compiler.CoreIRToProceduralIR
+    Compiler.ForSyDeIRToProceduralIR
     Compiler.ForSyDeIR
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
@@ -114,7 +119,8 @@ executable forsyde-lsp-exe
     LSP.Uri
     Visualiser.SKGraphSchema
     Visualiser.KLighD
-    Utilities
+    Utilities.OutputHandler
+    Utilities.Utilities
 
 test-suite forsyde-devtools-test
   import: common-options

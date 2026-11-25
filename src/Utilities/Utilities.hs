@@ -1,4 +1,4 @@
-module Utilities
+module Utilities.Utilities
   ( scheduleAndBuffer,
     Stack,
     emptyStack,
