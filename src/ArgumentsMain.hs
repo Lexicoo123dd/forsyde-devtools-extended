@@ -40,6 +40,7 @@ data Target
 data InputType
   = StdIn
   | Predefined
+  deriving (Eq)
 
 data Runs
   = Limited Int

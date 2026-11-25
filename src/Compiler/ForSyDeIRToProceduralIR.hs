@@ -1,11 +1,37 @@
 module Compiler.ForSyDeIRToProceduralIR where
 
 import ArgumentsMain (InputType (Predefined, StdIn), Runs (Limited, Perpetual))
+import Data.List (find)
 import Compiler.CoreIRToProceduralIR (translateIRFunction)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
 import Compiler.Scheduler.Common (Schedule (..), recordToFlatSchedule)
 import GHC hiding (targetId)
+
+-- | Generates an `input.h` header with #define NUM_ITERATIONS, consumption rates,
+-- and placeholder static arrays for each system input.
+generateInputHeader :: IRSystem -> Schedule -> String
+generateInputHeader (IRSystem (inputList, _) _ irSignals _) schedule =
+  let flatSched = recordToFlatSchedule schedule
+      headerGuard = "#ifndef INPUT_H\n#define INPUT_H\n\n#define NUM_ITERATIONS 1\n#define iteration_max NUM_ITERATIONS\n\n"
+      footerGuard = "#endif // INPUT_H\n"
+
+      genInputDef sigId =
+        let (tgtActorId, tgtRate) = case find (\(IRSignal id' _ _) -> id' == sigId) irSignals of
+              Just (IRSignal _ _ (dstId, rate)) -> (dstId, rate)
+              Nothing -> (sigId, 1)
+            reps = length (filter (== tgtActorId) flatSched)
+            totalRate = max 1 (reps * tgtRate)
+            rateDef = "#define RATE_" ++ show sigId ++ " " ++ show totalRate ++ "\n"
+            arrayDecl = "static const token input_" ++ show sigId ++ "[NUM_ITERATIONS * RATE_" ++ show sigId ++ "] = { 0 };\n"
+         in rateDef ++ arrayDecl ++ "\n"
+
+      body =
+        if null inputList
+          then ""
+          else "/* Input consumption rates per schedule period and placeholder input arrays */\n"
+                 ++ concatMap genInputDef inputList
+   in headerGuard ++ body ++ footerGuard
 
 -- | The `TranslationContext` is a data type which is used to pass around
 -- context required to complete the translation of ForSyDeIR to

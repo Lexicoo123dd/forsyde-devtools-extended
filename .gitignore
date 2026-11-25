@@ -32,6 +32,7 @@ stack.yaml.lock
 !/examples/test/*.hcr
 !/examples/test/*.fir
 !/examples/test/*.pir
+output/
 
 # Ignore build outputs from performing a nix-build or `nix build` command
 result
