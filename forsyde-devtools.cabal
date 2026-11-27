@@ -48,6 +48,9 @@ library
     Compiler.CoreIRToProceduralIR
     Compiler.ForSyDeIR
     Compiler.ForSyDeIRToProceduralIR
+    Compiler.ForSyDeIRToProceduralIR.Common
+    Compiler.ForSyDeIRToProceduralIR.MultiCore
+    Compiler.ForSyDeIRToProceduralIR.SingleCore
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
@@ -82,6 +85,9 @@ executable forsyde-compiler-exe
     Compiler.CoreIRToProceduralIR
     Compiler.ForSyDeIR
     Compiler.ForSyDeIRToProceduralIR
+    Compiler.ForSyDeIRToProceduralIR.Common
+    Compiler.ForSyDeIRToProceduralIR.MultiCore
+    Compiler.ForSyDeIRToProceduralIR.SingleCore
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
     Compiler.ProceduralIRToC
@@ -106,8 +112,11 @@ executable forsyde-lsp-exe
     Compiler.CoreIR
     Compiler.CoreIRToForSyDeIR
     Compiler.CoreIRToProceduralIR
-    Compiler.ForSyDeIRToProceduralIR
     Compiler.ForSyDeIR
+    Compiler.ForSyDeIRToProceduralIR
+    Compiler.ForSyDeIRToProceduralIR.Common
+    Compiler.ForSyDeIRToProceduralIR.MultiCore
+    Compiler.ForSyDeIRToProceduralIR.SingleCore
     Compiler.GHCCoreAPI
     Compiler.ProceduralIR
     Compiler.SchedulerMain
