@@ -10,7 +10,7 @@ import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
 import Compiler.Types (cUnionField)
 import Data.List (elemIndex)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe)
 import GHC hiding (Type, targetId)
 import GHC.Core
 import GHC.Plugins hiding (Type)
@@ -40,6 +40,12 @@ data FunctionContent
   | FMultiply
   | FDiv
   | FNegate
+  | FEqual
+  | FNotEqual
+  | FLess
+  | FLessEqual
+  | FGreater
+  | FGreaterEqual
 
 initialTranslationContext :: DynFlags -> TranslationContext
 initialTranslationContext dflags =
@@ -197,9 +203,11 @@ translateCoreExprToExpr context expr =
 translateAltList :: TranslationContext -> [Alt CoreBndr] -> Maybe CoreExpr -> Int -> Int -> TranslationContext
 translateAltList context alts cond inputId inputIndex = case alts of
   [] -> context
+  -- For all alternatives in alts, check if alt is a branching alternative...
   _
-    | any isLitAlt alts ->
+    | any isBranchAlt alts ->
         translateBranch context alts cond inputId inputIndex
+  -- ...otherwise fall through and deconstruct alt list
   (Alt (DataAlt dc) ids e) : altsTail -> case showPpr (flags context) dc of
     -- An empty list pattern match indicates the end of function input
     "[]" ->
@@ -216,7 +224,7 @@ translateAltList context alts cond inputId inputIndex = case alts of
           context1 = context {functionVariables = (variableId, variableExpression) : functionVariables context}
           context2 = translateFunctionExpr context1 inputId inputIndex e
        in translateAltList context2 altsTail cond inputId inputIndex
-    -- A unboxed Int constructor: DataAlt I#
+    -- Special case for integer
     -- Aliases the unboxed binder to the same expression as Int conditional
     "I#" ->
       let context1 = case (ids, cond) of
@@ -232,52 +240,71 @@ translateAltList context alts cond inputId inputIndex = case alts of
   (Alt DEFAULT _ _) : altsTail -> translateAltList context altsTail cond inputId inputIndex
   alt : _ -> error ("translateAltList - unsupported alt: " ++ prettyCoreAlt (flags context) alt)
   where
-    isLitAlt (Alt (LitAlt _) _ _) = True
-    isLitAlt _ = False
+    -- Helper to check for alt representing branch
+    isBranchAlt (Alt (LitAlt _) _ _) = True
+    isBranchAlt (Alt (DataAlt dc) _ _) = showPpr (flags context) dc `elem` ["True", "False"]
+    isBranchAlt _ = False
 
 -- | Translates branching on an unboxed literal into an SIf statement
--- (Currently Int only)
 translateBranch :: TranslationContext -> [Alt CoreBndr] -> Maybe CoreExpr -> Int -> Int -> TranslationContext
 translateBranch context alts cond inputId inputIndex =
   let targetExpr = case cond of
         Just scrExpr -> translateCoreExprToExpr context scrExpr
         Nothing -> error "translateBranch - missing scrutinee expression for condition"
 
-      litAlts = [(l, e) | Alt (LitAlt l) _ e <- alts]
-
-      maybeDefaultExpr = case [e | Alt DEFAULT _ e <- alts] of
-        (e : _) -> Just e
-        [] -> Nothing
-
       ensureScope :: Statement -> Statement
       ensureScope s@(SScope _) = s
       ensureScope s = SScope [s]
 
-      -- Translate DEFAULT branch (if present) to serve as the innermost else scope
-      baseElseScope = case maybeDefaultExpr of
-        Just defExpr ->
-          let contextDef = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex defExpr
-           in Just (ensureScope (scope contextDef))
-        Nothing -> Nothing
-
-      -- Build an SIf node for each literal branch, nesting the remaining branches in the else scope
-      buildIf (lit, thenExpr) currentElse =
-        let litVal = case lit of
-              LitNumber _ n -> fromIntegral n
-              _ -> error $ "translateBranch - unsupported literal: " ++ showPpr (flags context) lit
-            condExpr = EBinOp Equal targetExpr (ELit (LInt litVal))
-            contextThen = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex thenExpr
-            thenScope = ensureScope (scope contextThen)
-            elseScope = case currentElse of
-              Just s -> Just (ensureScope s)
-              Nothing -> Nothing
-         in Just (SIf condExpr thenScope elseScope)
+      maybeTrueExpr = listToMaybe [e | Alt (DataAlt dc) _ e <- alts, showPpr (flags context) dc == "True"]
+      maybeFalseExpr = listToMaybe [e | Alt (DataAlt dc) _ e <- alts, showPpr (flags context) dc == "False"]
 
       -- Construct SIf with the else branch
-      topIfStmt = case foldr buildIf baseElseScope litAlts of
-        Just ifStmt -> ifStmt
-        Nothing -> error "translateBranch - no LitAlt branches found"
+      topIfStmt = case (maybeTrueExpr, maybeFalseExpr) of
+        (Just trueExpr, Just falseExpr) ->
+          let contextThen = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex trueExpr
+              contextElse = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex falseExpr
+              thenScope = ensureScope (scope contextThen)
+              elseScope = Just (ensureScope (scope contextElse))
+           in SIf targetExpr thenScope elseScope
+        _ ->
+          -- Extract comparison condition and body from an alternative
+          let extractBranch = \case
+                -- Numeric/primitive literal branches (Int, Float, etc.)
+                Alt (LitAlt lit) _ thenExpr ->
+                  let valExpr = case coreLiteralToIR lit of
+                        Just dl -> ELit dl
+                        Nothing -> case lit of
+                          LitNumber _ n -> ELit (LInt (fromIntegral n))
+                          _ -> error $ "translateBranch - unsupported literal: " ++ showPpr (flags context) lit
+                   in Just (EBinOp Equal targetExpr valExpr, thenExpr)
+                _ -> Nothing
 
+              -- Check if DEFAULT branch exists
+              maybeDefaultExpr = case [e | Alt DEFAULT _ e <- alts] of
+                (e : _) -> Just e
+                [] -> Nothing
+
+              -- Translate DEFAULT branch (if present) to serve as the innermost else scope
+              baseElseScope = case maybeDefaultExpr of
+                Just defExpr ->
+                  let contextDef = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex defExpr
+                   in Just (ensureScope (scope contextDef))
+                Nothing -> Nothing
+
+              branchList = mapMaybe extractBranch alts
+
+              -- Build an SIf node for each literal branch, nesting the remaining branches in the else scope
+              buildIf (condExpr, thenExpr) currentElse =
+                let contextThen = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex thenExpr
+                    thenScope = ensureScope (scope contextThen)
+                    elseScope = currentElse
+                 in Just (SIf condExpr thenScope elseScope)
+           in case foldr buildIf baseElseScope branchList of
+                Just ifStmt -> ifStmt
+                Nothing -> error "translatebranch - no valid branches found to translate"
+
+      -- Attach/append if statement to existing statements
       existingStmts = case scope context of
         SScope stmts -> stmts
         other -> [other]
@@ -297,6 +324,8 @@ translateOutputExprToFunctionContentList context expr acc = case expr of
     "(,,)" -> FTuple : acc
     "(,,,)" -> FTuple : acc
     "[]" -> FEmptyList : acc
+    "True" -> FLit (LBool True) : acc
+    "False" -> FLit (LBool False) : acc
     "+" -> FPlus : acc
     "+#" -> FPlus : acc
     "-" -> FMinus : acc
@@ -304,6 +333,12 @@ translateOutputExprToFunctionContentList context expr acc = case expr of
     "*" -> FMultiply : acc
     "*#" -> FMultiply : acc
     "div" -> FDiv : acc
+    "==" -> FEqual : acc
+    "/=" -> FNotEqual : acc
+    "<" -> FLess : acc
+    "<=" -> FLessEqual : acc
+    ">" -> FGreater : acc
+    ">=" -> FGreaterEqual : acc
     "quotInt#" -> FDiv : acc
     "negate" -> FNegate : acc
     "negateInt#" -> FNegate : acc
@@ -377,6 +412,12 @@ functionContentToStack context exprsStack content = case content of
   FMinus -> binOpContentToStack Minus exprsStack
   FMultiply -> binOpContentToStack Multiply exprsStack
   FDiv -> binOpContentToStack Divide exprsStack
+  FEqual -> binOpContentToStack Equal exprsStack
+  FNotEqual -> binOpContentToStack NotEqual exprsStack
+  FLess -> binOpContentToStack Less exprsStack
+  FLessEqual -> binOpContentToStack LessEqual exprsStack
+  FGreater -> binOpContentToStack Greater exprsStack
+  FGreaterEqual -> binOpContentToStack GreaterEqual exprsStack
   FNegate ->
     let (exprList, exprsStack1) = case (pop exprsStack) of
           Nothing -> error "translateFunctionContent - empty expression stack when popping"
