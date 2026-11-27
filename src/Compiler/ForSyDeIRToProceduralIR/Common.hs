@@ -1,5 +1,7 @@
 module Compiler.ForSyDeIRToProceduralIR.Common
   ( TranslationContext (..),
+    BufferKind (..),
+    determineBufferKind,
     translateActorType,
     translateIRFunctionToGlobals,
     translateIRConstructor,
@@ -10,6 +12,7 @@ import ArgumentsMain (InputType (..), Runs)
 import Compiler.CoreIRToProceduralIR (translateIRFunction)
 import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
+import Compiler.Scheduler.Common (Schedule (..))
 import GHC (DynFlags)
 
 -- | The `TranslationContext` is a data type which is used to pass around
@@ -33,6 +36,20 @@ data TranslationContext = TranslationContext
     initFunctions :: [Global],
     functions :: [Global]
   }
+
+-- | Buffer representation kind
+data BufferKind = BufferNonBlocking | BufferBlocking
+  deriving (Show, Eq)
+
+-- | Determines whether a signal buffer should be blocking or non-blocking.
+-- In single-core execution (<= 1 core), buffers are non-blocking.
+-- In multi-core execution, buffers use thread-safe blocking SPSC queues.
+determineBufferKind :: Schedule -> BufferKind
+determineBufferKind schedule
+  | length schedMatrix <= 1 = BufferNonBlocking
+  | otherwise = BufferBlocking
+  where
+    schedMatrix = schedPerCore schedule
 
 translateActorType :: ActorType -> String
 translateActorType actorType = case actorType of
@@ -66,18 +83,6 @@ getTargetRate context signalId =
    in case signal of
         Just (IRSignal _ _ (_, rate)) -> rate
         Nothing -> error ("getTargetRate - signal not found: " ++ show signalId)
-
--- Get the rate from the schedule given an ActorId and bufferList
-getScheduleBufferRate :: IRId -> [(IRId, Int)] -> Int
-getScheduleBufferRate actorId bufferList =
-  case bufferList of
-    [] -> error ("buffer rate finder - actor not found: " ++ show actorId)
-    (x, rate) : xs ->
-      if (x == actorId)
-        then
-          rate
-        else
-          getScheduleBufferRate actorId xs
 
 translateIRFunctionToGlobals :: [IRConstructor] -> TranslationContext -> IRFunction -> TranslationContext
 translateIRFunctionToGlobals constructors currentContext function =
@@ -185,7 +190,7 @@ translateIRConstructor initialContext constructor = case constructor of
                                           ( EBinOp
                                               Multiply
                                               (EVar ("iteration_current"))
-                                              (EInt (getScheduleBufferRate signalId (schedulerBufferList initialContext)))
+                                              (EVar ("RATE_" ++ show signalId))
                                           )
                                           (EVar ("i_" ++ show signalId))
                                       )

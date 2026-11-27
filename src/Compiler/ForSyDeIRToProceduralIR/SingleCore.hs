@@ -11,7 +11,7 @@ translateSingleCoreProgram schedule initialContext (IRSystem (_inputList, _outpu
   let scheduleList = recordToFlatSchedule schedule
       bufferList = schedBufferSizes schedule
       context1 = foldl' translateIRConstructor initialContext constructors
-      context2 = foldl' translateBuffer context1 bufferList
+      context2 = foldl' (translateBuffer schedule) context1 bufferList
       context3 = foldl' (translateIRFunctionToGlobals constructors) context2 functionList
       main = translateContextToMain context3 scheduleList
    in Prog (reverse (initFunctions context3) ++ [main] ++ reverse (functions context3))
@@ -21,10 +21,14 @@ translateSingleCoreProgram schedule initialContext (IRSystem (_inputList, _outpu
 -- statement which are used to update the `TranslationContext`. Note that io
 -- token statements are only created for buffers which relate to with system
 -- inputs and outputs.
-translateBuffer :: TranslationContext -> (IRId, Int) -> TranslationContext
-translateBuffer initialContext (bufferId, bufferSize) =
-  let initStmt = SVarDef (TPointer (TIdent "buffer_nonblocking")) (show bufferId) (ECall "buffer_nonblocking_new" [EInt bufferSize])
-      freeStmt = SExpr (ECall "buffer_nonblocking_free" [EVar $ show bufferId])
+translateBuffer :: Schedule -> TranslationContext -> (IRId, Int) -> TranslationContext
+translateBuffer schedule initialContext (bufferId, bufferSize) =
+  let kind = determineBufferKind schedule
+      allocFunc = case kind of
+        BufferNonBlocking -> "buffer_nonblocking_new"
+        BufferBlocking -> "buffer_blocking_new"
+      initStmt = SVarDef (TPointer (TIdent "buffer_t")) (show bufferId) (ECall allocFunc [EInt bufferSize])
+      freeStmt = SExpr (ECall "buffer_free" [EVar $ show bufferId])
    in if (elem bufferId (systemInputs initialContext))
         then case (inputType initialContext) of
           -- If stdin is used, then need to define input handling arrays
@@ -52,13 +56,13 @@ translateContextToMain context scheduleList =
         (Predefined, Perpetual) ->
           [SVarAssign "iteration_current" (EBinOp Plus (EVar "iteration_current") (EInt 1))]
             ++ (foldl' resetIterationVariablesFromInputs [] (systemInputs context))
-            ++ [ SIf (EBinOp Equal (EVar "iteration_current") (EVar "iteration_max")) (SScope [SVarAssign "iteration_current" (EInt 0)]) Nothing
+            ++ [ SIf (EBinOp Equal (EVar "iteration_current") (EVar "NUM_ITERATIONS")) (SScope [SVarAssign "iteration_current" (EInt 0)]) Nothing
                ]
         (Predefined, Limited _) ->
           [SVarAssign "iteration_current" (EBinOp Plus (EVar "iteration_current") (EInt 1))]
             ++ (foldl' resetIterationVariablesFromInputs [] (systemInputs context))
             ++ [ SIf
-                   (EBinOp Equal (EVar "iteration_current") (EVar "iteration_max"))
+                   (EBinOp Equal (EVar "iteration_current") (EVar "NUM_ITERATIONS"))
                    ( SScope
                        [ SVarAssign "iteration_current" (EInt 0),
                          SVarAssign

@@ -5,19 +5,7 @@ import Data.List (nub)
 import Compiler.ForSyDeIR
 import Compiler.ForSyDeIRToProceduralIR.Common
 import Compiler.ProceduralIR
-import Compiler.Scheduler.Common
-
--- | Buffer representation kind
-data BufferKind = BufferNonBlocking | BufferBlocking
-  deriving (Show, Eq)
-
--- | Determines whether a signal buffer should be blocking or non-blocking.
--- In single-core execution (<= 1 core), buffers are non-blocking.
--- In multi-core execution, buffers use thread-safe blocking SPSC queues.
-determineBufferKind :: [[ActorInstance]] -> BufferKind
-determineBufferKind coreSchedule
-  | length coreSchedule <= 1 = BufferNonBlocking
-  | otherwise = BufferBlocking
+import Compiler.Scheduler.Common (ActorInstance, Schedule (..))
 
 translateMultiCoreProgram :: Schedule -> TranslationContext -> Target -> [IRConstructor] -> [IRFunction] -> [IRId] -> [IRId] -> IRSystem -> Program
 translateMultiCoreProgram schedule initialContext target constructors functionList inputList outputList _irSystem =
@@ -87,11 +75,10 @@ makeWorkerFunction context coreFirings coreIdx target inputList outputList =
         PICO2 -> GFuncDef Nothing TVoid funcName [] workerBody
 
 makeMultiCoreMain :: TranslationContext -> Schedule -> [(IRId, Int)] -> Target -> Int -> Global
-makeMultiCoreMain context sched bufferList target numCores =
-  let schedMatrix = schedPerCore sched
-      initStmt = SExpr (ECall "init" [])
+makeMultiCoreMain context schedule bufferList target numCores =
+  let initStmt = SExpr (ECall "init" [])
       allocBufferStmt (bId, bSize) =
-        let kind = determineBufferKind schedMatrix
+        let kind = determineBufferKind schedule
             allocFn = case kind of
               BufferNonBlocking -> "buffer_nonblocking_new"
               BufferBlocking -> "buffer_blocking_new"
