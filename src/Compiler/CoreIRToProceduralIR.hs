@@ -10,7 +10,7 @@ import Compiler.ForSyDeIR
 import Compiler.ProceduralIR
 import Compiler.Types (cUnionField)
 import Data.List (elemIndex)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe)
 import GHC hiding (Type, targetId)
 import GHC.Core
 import GHC.Plugins hiding (Type)
@@ -40,6 +40,12 @@ data FunctionContent
   | FMultiply
   | FDiv
   | FNegate
+  | FEqual
+  | FNotEqual
+  | FLess
+  | FLessEqual
+  | FGreater
+  | FGreaterEqual
 
 initialTranslationContext :: DynFlags -> TranslationContext
 initialTranslationContext dflags =
@@ -135,6 +141,11 @@ translateFunctionExpr context inputId inputIndex expr = case expr of
   Lam b e ->
     let context1 = context {functionInputs = [(IRVar b)]}
      in translateFunctionExpr context1 inputId inputIndex e
+  Let (NonRec b rhs) e ->
+    let context1 = case tryTranslateCoreExprToExpr context rhs of
+          Just expr1 -> context {functionVariables = (IRVar b, expr1) : functionVariables context}
+          Nothing -> context
+     in translateFunctionExpr context1 inputId inputIndex e
   Let _ e -> translateFunctionExpr context inputId inputIndex e
   -- The Core IR `Case` data type is used in function expressions to pattern
   -- match on a functions inputs. Checks if the current binder being pattern
@@ -145,13 +156,15 @@ translateFunctionExpr context inputId inputIndex expr = case expr of
     Just newInputId ->
       -- Pattern matching on a new function input pass new input id and reset
       -- index to zero
-      let context1 = translateAltList context alts newInputId 0
+      let context1 = translateAltList context alts (Just (Var i)) newInputId 0
        in context1
     Nothing ->
       -- Still pattern maching on previous function input continue passing
       -- current input id and increment input index
-      let context1 = translateAltList context alts inputId (inputIndex + 1)
+      let context1 = translateAltList context alts (Just (Var i)) inputId (inputIndex + 1)
        in context1
+  Case scrExpr _ _ty alts ->
+    translateAltList context alts (Just scrExpr) inputId inputIndex
   -- Reached the main content of the function
   _ ->
     let functionContentList = translateOutputExprToFunctionContentList context expr []
@@ -159,16 +172,47 @@ translateFunctionExpr context inputId inputIndex expr = case expr of
         context1 = context {scope = scopeStmt}
      in context1
 
+-- | Attempts to translate a single non-list CoreExpr (such as a case scrutinee)
+-- into a Procedural IR Expression.
+tryTranslateCoreExprToExpr :: TranslationContext -> CoreExpr -> Maybe Expression
+tryTranslateCoreExprToExpr context expr =
+  let contentList = translateOutputExprToFunctionContentList context expr []
+      isScalarContent = not (null contentList) && all (not . isCollectionOp) contentList
+      isCollectionOp = \case
+        FEmptyList -> True
+        FCons -> True
+        FTuple -> True
+        _ -> False
+   in if not isScalarContent
+        then Nothing
+        else
+          let initialStack = push [] emptyStack
+              finalStack = foldl' (functionContentToStack context) initialStack contentList
+           in case pop finalStack of
+                Just ([resultExpr], rest) | null (stackToList rest) -> Just resultExpr
+                _ -> Nothing
+
+translateCoreExprToExpr :: TranslationContext -> CoreExpr -> Expression
+translateCoreExprToExpr context expr =
+  case tryTranslateCoreExprToExpr context expr of
+    Just resultExpr -> resultExpr
+    Nothing -> error ("translateCoreExprToExpr - unsupported scrutinee: " ++ showPpr (flags context) expr)
+
 -- | Helper function which identifies a binder as a function input and updates
 -- the translation context with its associated Procedural IR expression
-translateAltList :: TranslationContext -> [Alt CoreBndr] -> Int -> Int -> TranslationContext
-translateAltList context alts inputId inputIndex = case alts of
+translateAltList :: TranslationContext -> [Alt CoreBndr] -> Maybe CoreExpr -> Int -> Int -> TranslationContext
+translateAltList context alts cond inputId inputIndex = case alts of
   [] -> context
+  -- For all alternatives in alts, check if alt is a branching alternative...
+  _
+    | any isBranchAlt alts ->
+        translateBranch context alts cond inputId inputIndex
+  -- ...otherwise fall through and deconstruct alt list
   (Alt (DataAlt dc) ids e) : altsTail -> case showPpr (flags context) dc of
     -- An empty list pattern match indicates the end of function input
     "[]" ->
       let context1 = translateFunctionExpr context inputId inputIndex e
-       in translateAltList context1 altsTail inputId inputIndex
+       in translateAltList context1 altsTail cond inputId inputIndex
     -- A cons pattern match indicates a new function input, the following
     -- builds the associated variable expression for the input and updates the
     -- translation context
@@ -179,11 +223,92 @@ translateAltList context alts inputId inputIndex = case alts of
           variableExpression = EMemberAccess (EArrayAccess (EVar ("input_" ++ show (inputId + 1))) (ELit (LInt inputIndex))) (typeTranslation)
           context1 = context {functionVariables = (variableId, variableExpression) : functionVariables context}
           context2 = translateFunctionExpr context1 inputId inputIndex e
-       in translateAltList context2 altsTail inputId inputIndex
+       in translateAltList context2 altsTail cond inputId inputIndex
+    -- Special case for integer
+    -- Aliases the unboxed binder to the same expression as Int conditional
+    "I#" ->
+      let context1 = case (ids, cond) of
+            (unboxedVar : _, Just scrExpr) ->
+              case tryTranslateCoreExprToExpr context scrExpr of
+                Just expr -> context {functionVariables = (IRVar unboxedVar, expr) : functionVariables context}
+                Nothing -> context
+            _ -> context
+          context2 = translateFunctionExpr context1 inputId inputIndex e
+       in translateAltList context2 altsTail cond inputId inputIndex
     _ -> error ("translateAltList - unsupported data alt: " ++ showPpr (flags context) dc)
   -- Skip DEFAULT pattern match, ignoring base case since not translating errors
-  (Alt DEFAULT _ _) : altsTail -> translateAltList context altsTail inputId inputIndex
+  (Alt DEFAULT _ _) : altsTail -> translateAltList context altsTail cond inputId inputIndex
   alt : _ -> error ("translateAltList - unsupported alt: " ++ prettyCoreAlt (flags context) alt)
+  where
+    -- Helper to check for alt representing branch
+    isBranchAlt (Alt (LitAlt _) _ _) = True
+    isBranchAlt (Alt (DataAlt dc) _ _) = showPpr (flags context) dc `elem` ["True", "False"]
+    isBranchAlt _ = False
+
+-- | Translates branching on an unboxed literal into an SIf statement
+translateBranch :: TranslationContext -> [Alt CoreBndr] -> Maybe CoreExpr -> Int -> Int -> TranslationContext
+translateBranch context alts cond inputId inputIndex =
+  let targetExpr = case cond of
+        Just scrExpr -> translateCoreExprToExpr context scrExpr
+        Nothing -> error "translateBranch - missing scrutinee expression for condition"
+
+      ensureScope :: Statement -> Statement
+      ensureScope s@(SScope _) = s
+      ensureScope s = SScope [s]
+
+      maybeTrueExpr = listToMaybe [e | Alt (DataAlt dc) _ e <- alts, showPpr (flags context) dc == "True"]
+      maybeFalseExpr = listToMaybe [e | Alt (DataAlt dc) _ e <- alts, showPpr (flags context) dc == "False"]
+
+      -- Construct SIf with the else branch
+      topIfStmt = case (maybeTrueExpr, maybeFalseExpr) of
+        (Just trueExpr, Just falseExpr) ->
+          let contextThen = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex trueExpr
+              contextElse = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex falseExpr
+              thenScope = ensureScope (scope contextThen)
+              elseScope = Just (ensureScope (scope contextElse))
+           in SIf targetExpr thenScope elseScope
+        _ ->
+          -- Extract comparison condition and body from an alternative
+          let extractBranch = \case
+                -- Numeric/primitive literal branches (Int, Float, etc.)
+                Alt (LitAlt lit) _ thenExpr ->
+                  let valExpr = case coreLiteralToIR lit of
+                        Just dl -> ELit dl
+                        Nothing -> case lit of
+                          LitNumber _ n -> ELit (LInt (fromIntegral n))
+                          _ -> error $ "translateBranch - unsupported literal: " ++ showPpr (flags context) lit
+                   in Just (EBinOp Equal targetExpr valExpr, thenExpr)
+                _ -> Nothing
+
+              -- Check if DEFAULT branch exists
+              maybeDefaultExpr = case [e | Alt DEFAULT _ e <- alts] of
+                (e : _) -> Just e
+                [] -> Nothing
+
+              -- Translate DEFAULT branch (if present) to serve as the innermost else scope
+              baseElseScope = case maybeDefaultExpr of
+                Just defExpr ->
+                  let contextDef = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex defExpr
+                   in Just (ensureScope (scope contextDef))
+                Nothing -> Nothing
+
+              branchList = mapMaybe extractBranch alts
+
+              -- Build an SIf node for each literal branch, nesting the remaining branches in the else scope
+              buildIf (condExpr, thenExpr) currentElse =
+                let contextThen = translateFunctionExpr (context {scope = SScope []}) inputId inputIndex thenExpr
+                    thenScope = ensureScope (scope contextThen)
+                    elseScope = currentElse
+                 in Just (SIf condExpr thenScope elseScope)
+           in case foldr buildIf baseElseScope branchList of
+                Just ifStmt -> ifStmt
+                Nothing -> error "translatebranch - no valid branches found to translate"
+
+      -- Attach/append if statement to existing statements
+      existingStmts = case scope context of
+        SScope stmts -> stmts
+        other -> [other]
+   in context {scope = SScope (existingStmts ++ [topIfStmt])}
 
 -- | Translates the main `CoreExpr` of an `IRFunction` into a list of
 -- `FunctionContent`. The returned `FunctionContent` list is in reverse polish
@@ -199,12 +324,24 @@ translateOutputExprToFunctionContentList context expr acc = case expr of
     "(,,)" -> FTuple : acc
     "(,,,)" -> FTuple : acc
     "[]" -> FEmptyList : acc
+    "True" -> FLit (LBool True) : acc
+    "False" -> FLit (LBool False) : acc
     "+" -> FPlus : acc
+    "+#" -> FPlus : acc
     "-" -> FMinus : acc
+    "-#" -> FMinus : acc
     "*" -> FMultiply : acc
+    "*#" -> FMultiply : acc
     "div" -> FDiv : acc
+    "==" -> FEqual : acc
+    "/=" -> FNotEqual : acc
+    "<" -> FLess : acc
+    "<=" -> FLessEqual : acc
+    ">" -> FGreater : acc
+    ">=" -> FGreaterEqual : acc
+    "quotInt#" -> FDiv : acc
     "negate" -> FNegate : acc
-    -- Only adds current variable id if its associated to a current variable expression
+    "negateInt#" -> FNegate : acc
     _ -> case lookup (IRVar varId) (functionVariables context) of
       Just _ -> FVar varId : acc
       Nothing -> acc
@@ -216,7 +353,7 @@ translateOutputExprToFunctionContentList context expr acc = case expr of
 -- | Translates a `FunctionContent` list into a Procedural IR scope.
 translateFunctionContent :: TranslationContext -> [FunctionContent] -> Statement
 translateFunctionContent context contentList =
-  let finalExprsStack = foldl' functionContentToStack emptyStack contentList
+  let finalExprsStack = foldl' (functionContentToStack context) emptyStack contentList
       stmtList = foldl' stackToScope [] (zip (outputIds context) (stackToList finalExprsStack))
    in SScope stmtList
   where
@@ -229,60 +366,68 @@ translateFunctionContent context contentList =
       let typeTranslation = cUnionField outputSignalType
           outputStmts = map (\(idx, expr) -> SArrayAssign outputSignalId (ELit (LInt idx)) (Just typeTranslation) expr) (zip [0 ..] exprList)
        in (acc ++ outputStmts)
-    -- Helper function to handle the case when the `FunctionContent` represents
-    -- a `BinaryOperator`
-    binOpContentToStack :: BinaryOperator -> Stack [Expression] -> Stack [Expression]
-    binOpContentToStack binOp exprsStack =
-      let (exprList, exprsStack1) = case (pop exprsStack) of
-            Nothing -> error "translateFunctionContent - empty expression stack when popping"
-            Just (elist, stack1) -> (elist, stack1)
-          (expr1, expr2, exprTail) = case exprList of
-            (e1 : e2 : eTail) -> (EParen e1, EParen e2, eTail)
-            _ -> error ("translateFunctionContent - insufficient operands for " ++ show binOp)
-          newExpr = EBinOp binOp expr1 expr2
-          newExprList = newExpr : exprTail
-          exprsStack2 = push newExprList exprsStack1
-       in exprsStack2
-    -- Help function which uses a stack to convert a `FunctionContent` the
-    -- Procedural IR `Expression` it represents
-    functionContentToStack :: (Stack [Expression]) -> FunctionContent -> (Stack [Expression])
-    functionContentToStack exprsStack content = case content of
-      FEmptyList ->
-        let newExprList = []
-            exprsStack1 = push newExprList exprsStack
-         in exprsStack1
-      (FLit lit) ->
-        let (exprList, exprsStack1) = case (pop exprsStack) of
-              Nothing -> error "translateFunctionContent - empty expression stack when popping"
-              Just (elist, stack1) -> (elist, stack1)
-            expr = ELit lit
-            newExprList = expr : exprList
-            exprsStack2 = push newExprList exprsStack1
-         in exprsStack2
-      (FVar varId) ->
-        let (exprList, exprsStack1) = case (pop exprsStack) of
-              Nothing -> error "translateFunctionContent - empty expression stack when popping"
-              Just (elist, stack1) -> (elist, stack1)
-            variableExpr = case lookup (IRVar varId) (functionVariables context) of
-              Just expr -> expr
-              Nothing -> error ("translateFunctionContent - variable not found: " ++ showPpr (flags context) varId)
-            newExprList = variableExpr : exprList
-            exprsStack2 = push newExprList exprsStack1
-         in exprsStack2
-      FPlus -> binOpContentToStack Plus exprsStack
-      FMinus -> binOpContentToStack Minus exprsStack
-      FMultiply -> binOpContentToStack Multiply exprsStack
-      FDiv -> binOpContentToStack Divide exprsStack
-      FNegate ->
-        let (exprList, exprsStack1) = case (pop exprsStack) of
-              Nothing -> error "translateFunctionContent - empty expression stack when popping"
-              Just (elist, stack1) -> (elist, stack1)
-            (expr1, exprTail) = case exprList of
-              (e1 : eTail) -> (EParen e1, eTail)
-              _ -> error "translateFunctionContent - insufficient operands for Negate"
-            newExpr = EUnOp Negate expr1
-            newExprList = newExpr : exprTail
-            exprsStack2 = push newExprList exprsStack1
-         in exprsStack2
-      FCons -> exprsStack
-      FTuple -> exprsStack
+
+-- Helper function to handle the case when the `FunctionContent` represents
+-- a `BinaryOperator`
+binOpContentToStack :: BinaryOperator -> Stack [Expression] -> Stack [Expression]
+binOpContentToStack binOp exprsStack =
+  let (exprList, exprsStack1) = case (pop exprsStack) of
+        Nothing -> error "translateFunctionContent - empty expression stack when popping"
+        Just (elist, stack1) -> (elist, stack1)
+      (expr1, expr2, exprTail) = case exprList of
+        (e1 : e2 : eTail) -> (EParen e1, EParen e2, eTail)
+        _ -> error ("translateFunctionContent - insufficient operands for " ++ show binOp)
+      newExpr = EBinOp binOp expr1 expr2
+      newExprList = newExpr : exprTail
+      exprsStack2 = push newExprList exprsStack1
+   in exprsStack2
+
+-- Helper function which uses a stack to convert a `FunctionContent` into the
+-- Procedural IR `Expression` it represents
+functionContentToStack :: TranslationContext -> Stack [Expression] -> FunctionContent -> Stack [Expression]
+functionContentToStack context exprsStack content = case content of
+  FEmptyList ->
+    let newExprList = []
+        exprsStack1 = push newExprList exprsStack
+     in exprsStack1
+  (FLit lit) ->
+    let (exprList, exprsStack1) = case (pop exprsStack) of
+          Nothing -> error "translateFunctionContent - empty expression stack when popping"
+          Just (elist, stack1) -> (elist, stack1)
+        expr = ELit lit
+        newExprList = expr : exprList
+        exprsStack2 = push newExprList exprsStack1
+     in exprsStack2
+  (FVar varId) ->
+    let (exprList, exprsStack1) = case (pop exprsStack) of
+          Nothing -> error "translateFunctionContent - empty expression stack when popping"
+          Just (elist, stack1) -> (elist, stack1)
+        variableExpr = case lookup (IRVar varId) (functionVariables context) of
+          Just expr -> expr
+          Nothing -> error ("translateFunctionContent - variable not found: " ++ showPpr (flags context) varId)
+        newExprList = variableExpr : exprList
+        exprsStack2 = push newExprList exprsStack1
+     in exprsStack2
+  FPlus -> binOpContentToStack Plus exprsStack
+  FMinus -> binOpContentToStack Minus exprsStack
+  FMultiply -> binOpContentToStack Multiply exprsStack
+  FDiv -> binOpContentToStack Divide exprsStack
+  FEqual -> binOpContentToStack Equal exprsStack
+  FNotEqual -> binOpContentToStack NotEqual exprsStack
+  FLess -> binOpContentToStack Less exprsStack
+  FLessEqual -> binOpContentToStack LessEqual exprsStack
+  FGreater -> binOpContentToStack Greater exprsStack
+  FGreaterEqual -> binOpContentToStack GreaterEqual exprsStack
+  FNegate ->
+    let (exprList, exprsStack1) = case (pop exprsStack) of
+          Nothing -> error "translateFunctionContent - empty expression stack when popping"
+          Just (elist, stack1) -> (elist, stack1)
+        (expr1, exprTail) = case exprList of
+          (e1 : eTail) -> (EParen e1, eTail)
+          _ -> error "translateFunctionContent - insufficient operands for Negate"
+        newExpr = EUnOp Negate expr1
+        newExprList = newExpr : exprTail
+        exprsStack2 = push newExprList exprsStack1
+     in exprsStack2
+  FCons -> exprsStack
+  FTuple -> exprsStack
